@@ -1,0 +1,38 @@
+[Unit]
+Description=zxySSH MCP service (same-user GUI state)
+Documentation=file:///usr/share/doc/zxyssh/LAN-MCP-UBUNTU-DEBIAN.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The user manager runs this service as the same Linux user as zxySSH.
+# Keep these roots identical to the desktop's default XDG locations.
+EnvironmentFile=%h/.config/zxyssh/mcp.env
+Environment=XDG_DATA_HOME=%h/.local/share
+Environment=XDG_STATE_HOME=%h/.local/state
+ExecStart=%h/.local/bin/zxyssh mcp serve
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=%h/.local/share %h/.local/state
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=default.target

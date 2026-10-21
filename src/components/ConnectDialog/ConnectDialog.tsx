@@ -1,0 +1,360 @@
+import { useState, useCallback, useEffect } from 'react';
+import { X, Key, Lock, Eye, EyeOff, FolderOpen, FileKey, ArrowRightLeft } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import { useSessionStore } from '../../stores/sessionStore';
+import { useServerStore, type Server } from '../../stores/serverStore';
+import { safeInvoke } from '../../lib/tauri';
+import { useRuntimeCapabilitiesStore } from '../../stores/runtimeCapabilitiesStore';
+import { useSshKeyPicker, getFileName } from '../../hooks/useSshKeyPicker';
+
+interface ConnectDialogProps {
+  isOpen: boolean;
+  server: Server | null;
+  forceNew?: boolean;
+  onClose: () => void;
+  onConnected: (sessionId: string) => void;
+}
+
+function JumpHostBadge({ jumpHostId }: { jumpHostId: string }) {
+  const { servers } = useServerStore();
+  const jumpHost = servers.find((s) => s.id === jumpHostId);
+  if (!jumpHost) return null;
+  return (
+    <div className="text-xs text-tokyo-yellow mt-1.5 flex items-center gap-1">
+      <ArrowRightLeft className="w-3 h-3" />
+      Via: {jumpHost.name} ({jumpHost.host}:{jumpHost.port})
+    </div>
+  );
+}
+
+export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onConnected }: ConnectDialogProps) {
+  const { connectWithCredentials, connectWithSavedCredentials } = useSessionStore();
+  const isMobile = useRuntimeCapabilitiesStore((state) => state.capabilities.isMobile);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // SSH key file state (native picker flow shared with AddServerDialog)
+  const {
+    keyPath,
+    keyContent,
+    isLoadingKey,
+    browseForSshKey,
+    setKeyContent,
+    setKey,
+    reset: resetKeyPicker,
+  } = useSshKeyPicker({
+    onBrowseStart: () => setError(null),
+    onError: setError,
+  });
+  const [usingSavedCredentials, setUsingSavedCredentials] = useState(false);
+  const [isLoadingCredentials, setIsLoadingCredentials] = useState(false);
+
+  // Load saved credentials when dialog opens
+  useEffect(() => {
+    if (isOpen && server) {
+      // Reset state first
+      setPassword('');
+      setShowPassword(false);
+      setIsConnecting(false);
+      setError(null);
+      resetKeyPicker();
+      setUsingSavedCredentials(false);
+      setIsLoadingCredentials(true);
+
+      const loadCredentials = async () => {
+        try {
+          const result = await safeInvoke<{ authType: string | null; hasCredential: boolean }>(
+            'credential_status', { request: { serverName: server.name } }
+          );
+          if (result.success && result.data.hasCredential) setUsingSavedCredentials(true);
+        } catch (err) {
+          console.error('[ConnectDialog] Error checking credential status:', err);
+        } finally {
+          setIsLoadingCredentials(false);
+        }
+      };
+
+      loadCredentials();
+    }
+  }, [isOpen, server?.id, server?.name, resetKeyPicker, setKey]);
+
+  const handleConnect = useCallback(async () => {
+    if (!server) return;
+
+    const isKeyAuth = server.auth_type === 'key' || server.auth_type === 'key_with_passphrase';
+
+    // Validate inputs
+    if (isKeyAuth && !keyContent) {
+      setError(isMobile ? 'Please paste an SSH private key' : 'Please select an SSH private key file');
+      return;
+    }
+
+    if (!isKeyAuth && !password) {
+      setError('Please enter a password');
+      return;
+    }
+
+    setIsConnecting(true);
+    setError(null);
+
+    try {
+      const session = usingSavedCredentials
+        ? await connectWithSavedCredentials(server.name, 80, 24, forceNew)
+        : await connectWithCredentials(
+          server.name,
+          isKeyAuth ? 'key' : 'password',
+          isKeyAuth ? (keyContent || '') : password,
+          isKeyAuth && password ? password : undefined,
+          80,
+          24,
+          forceNew
+        );
+
+      if (session) {
+        onConnected(session.id);
+        onClose();
+      } else {
+        console.error('[ConnectDialog] Connection failed: session is null');
+        setError('Failed to connect. Check your credentials and try again.');
+      }
+    } catch (err) {
+      console.error('[ConnectDialog] Connection error:', err);
+      setError(err instanceof Error ? err.message : 'Connection failed');
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [server, password, keyContent, isMobile, connectWithCredentials, connectWithSavedCredentials, usingSavedCredentials, forceNew, onConnected, onClose]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const isKeyAuth = server?.auth_type === 'key' || server?.auth_type === 'key_with_passphrase';
+    const canConnect = isKeyAuth ? !!keyContent : !!password;
+
+    if (e.key === 'Enter' && !isConnecting && canConnect) {
+      handleConnect();
+    }
+  }, [handleConnect, isConnecting, password, keyContent, server?.auth_type]);
+
+  if (!isOpen || !server) return null;
+
+  const isKeyAuth = server.auth_type === 'key' || server.auth_type === 'key_with_passphrase';
+
+  return (
+    <div className="responsive-dialog-layer fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+      />
+
+      {/* Dialog */}
+      <div className="responsive-dialog-panel relative min-w-0 bg-tokyo-bg-dark border border-tokyo-bg-hl rounded-lg shadow-xl w-full max-w-md mx-3 sm:mx-4">
+        {/* Header */}
+        <div className="responsive-dialog-header flex items-center justify-between gap-3 px-4 py-3 border-b border-tokyo-bg-hl">
+          <div className="flex min-w-0 items-center gap-3">
+            {isKeyAuth ? (
+              <Key className="w-5 h-5 text-tokyo-green" />
+            ) : (
+              <Lock className="w-5 h-5 text-tokyo-blue" />
+            )}
+            <h2 className="min-w-0 text-lg font-semibold text-tokyo-fg">Connect to Server</h2>
+          </div>
+          <button
+            className="p-1 rounded-md text-tokyo-comment hover:text-tokyo-fg hover:bg-tokyo-bg-hl transition-colors"
+            onClick={onClose}
+            aria-label="Close connect dialog"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4 space-y-4">
+          {/* Server Info */}
+          <div className="p-3 rounded-md bg-tokyo-bg border border-tokyo-bg-hl">
+            <div className="text-sm text-tokyo-comment">Connecting to</div>
+            <div className="break-words text-tokyo-fg font-medium">{server.name}</div>
+            <div className="break-all text-sm text-tokyo-comment mt-1">
+              {server.username}@{server.host}:{server.port}
+            </div>
+            {server.jump_host_id && (
+              <JumpHostBadge jumpHostId={server.jump_host_id} />
+            )}
+            {server.agent_forwarding && (
+              <div className="text-xs text-tokyo-cyan mt-1.5 flex items-center gap-1">
+                <Key className="w-3 h-3" />
+                Agent forwarding enabled
+              </div>
+            )}
+          </div>
+
+          {isLoadingCredentials && (
+            <div className="p-3 rounded-md bg-tokyo-blue/10 border border-tokyo-blue/30 text-tokyo-blue text-sm">
+              Loading saved credentials...
+            </div>
+          )}
+
+          {usingSavedCredentials && !isLoadingCredentials && (
+            <div className="p-3 rounded-md bg-tokyo-green/10 border border-tokyo-green/30 text-tokyo-green text-sm flex items-center gap-2">
+              <Key className="w-4 h-4" />
+              Saved credentials available. Click Connect to proceed.
+            </div>
+          )}
+
+          {error && (
+            <div className="p-3 rounded-md bg-tokyo-red/10 border border-tokyo-red/30 text-tokyo-red text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* SSH Key File Browser (for key auth) */}
+          {isKeyAuth && (
+            <div>
+              {isMobile ? (
+                <>
+                  <label htmlFor="mobileConnectionPrivateKey" className="block text-sm font-medium text-tokyo-fg mb-1">
+                    SSH Private Key
+                  </label>
+                  <textarea
+                    id="mobileConnectionPrivateKey"
+                    value={keyContent ?? ''}
+                    onChange={(event) => {
+                      setKeyContent(event.target.value || null);
+                      setError(null);
+                      setUsingSavedCredentials(false);
+                    }}
+                    rows={6}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    placeholder="Paste OpenSSH private key"
+                    className={cn(
+                      'w-full resize-y rounded-md px-3 py-2 font-mono text-sm',
+                      'bg-tokyo-bg border border-tokyo-bg-hl',
+                      'text-tokyo-fg placeholder-tokyo-comment',
+                      'focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue'
+                    )}
+                  />
+                </>
+              ) : (
+                <>
+                  <label className="block text-sm font-medium text-tokyo-fg mb-1">
+                    SSH Private Key File
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                <div
+                  className={cn(
+                    'min-w-0 flex-1 flex items-center gap-2 px-3 py-2 rounded-md',
+                    'bg-tokyo-bg border border-tokyo-bg-hl',
+                    'text-tokyo-fg',
+                    keyPath ? '' : 'text-tokyo-comment'
+                  )}
+                >
+                  <FileKey className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate text-sm">
+                    {keyPath ? getFileName(keyPath) : 'No key file selected'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={browseForSshKey}
+                  disabled={isLoadingKey || isConnecting}
+                  className={cn(
+                    'flex items-center justify-center gap-2 px-3 py-2 rounded-md',
+                    'bg-tokyo-bg-hl text-tokyo-fg',
+                    'hover:bg-tokyo-blue/20 hover:text-tokyo-blue',
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
+                    'transition-colors'
+                  )}
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  <span className="text-sm">{isLoadingKey ? 'Loading...' : 'Browse'}</span>
+                </button>
+                  </div>
+                  {keyPath && (
+                    <p className="mt-1 text-xs text-tokyo-comment truncate" title={keyPath}>
+                      {keyPath}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Password/Passphrase Input */}
+          <div>
+            <label className="block text-sm font-medium text-tokyo-fg mb-1">
+              {isKeyAuth ? 'Key Passphrase' : 'Password'}
+              {isKeyAuth && (
+                <span className="text-tokyo-comment ml-2">(leave empty if key has no passphrase)</span>
+              )}
+            </label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setUsingSavedCredentials(false);
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder={isKeyAuth ? 'Enter passphrase (optional)...' : 'Enter password...'}
+                autoFocus={!isKeyAuth}
+                className={cn(
+                  'w-full px-3 py-2 pr-10 rounded-md',
+                  'bg-tokyo-bg border border-tokyo-bg-hl',
+                  'text-tokyo-fg placeholder-tokyo-comment',
+                  'focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue'
+                )}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-tokyo-comment hover:text-tokyo-fg"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="responsive-dialog-actions flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isConnecting}
+              className={cn(
+                'px-4 py-2 rounded-md',
+                'bg-tokyo-bg-hl text-tokyo-fg',
+                'hover:bg-tokyo-bg hover:text-tokyo-fg',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                'transition-colors'
+              )}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={isConnecting || isLoadingKey || isLoadingCredentials || (!usingSavedCredentials && (isKeyAuth ? !keyContent : !password))}
+              className={cn(
+                'px-4 py-2 rounded-md',
+                'bg-tokyo-blue text-tokyo-on-accent',
+                'hover:bg-tokyo-blue/80',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                'transition-colors'
+              )}
+            >
+              {isConnecting ? 'Connecting...' : 'Connect'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

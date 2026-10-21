@@ -1,0 +1,30 @@
+{
+  "name": "zxyssh",
+  "version": "2.0.1",
+  "description": "Drive saved SSH sites through the zxySSH MCP service, with credentials held on the host.",
+  "author": {
+    "name": "zxySSH"
+  },
+  "repository": "https://github.com/opera163zuo/zxyssh",
+  "license": "GPL-3.0-only",
+  "keywords": ["ssh", "mcp", "remote-development", "coding-agents"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "zxySSH",
+    "shortDescription": "Drive saved SSH sites over MCP",
+    "longDescription": "Pair with the zxySSH MCP service on a Linux host to list saved sites, open your own terminal session, send input and read output. SSH credentials, private keys and sudo passwords stay on the service and are never exposed to the agent.",
+    "developerName": "zxySSH",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Saved site listing by name",
+      "Agent-owned terminal sessions",
+      "Terminal input and output",
+      "Server-managed sudo within a configured allowlist"
+    ],
+    "defaultPrompt": [
+      "List the sites saved on the zxySSH service.",
+      "Open a session for a saved site and report its hostname.",
+      "Check the status of a service on a saved site and show the terminal output."
+    ]
+  }
+}

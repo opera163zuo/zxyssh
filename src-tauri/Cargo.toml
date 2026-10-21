@@ -1,0 +1,75 @@
+[package]
+name = "zxyssh-desktop"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "High-performance SSH/SFTP terminal with AI integration"
+rust-version = "1.89"
+
+[lib]
+name = "zxyssh_core"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "zxyssh-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "dynamic-acl", "x11", "devtools"] }
+tauri-plugin-shell = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zxyssh-plugins = { path = "../plugins" }
+rusqlite = { version = "0.31", features = ["bundled"] }
+tokio-postgres = "0.7"
+tokio-stream = "0.1"
+mysql_async = { version = "0.34", default-features = false, features = ["minimal"] }
+directories = "5"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+ring = "0.17"
+argon2 = "0.5"
+rand = "0.8"
+base64 = "0.21"
+sha2 = "0.10"
+subtle = "2"
+zeroize = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+# 0.63.1+ validates client-side channel identities (GHSA-47hw-gvq5-r2gm).
+russh = { version = "0.63.3", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh-sftp = "2"
+ignore = "0.4"
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync", "io-std", "io-util", "rt-multi-thread", "macros", "time", "net", "process"] }
+interprocess = "2"
+axum = "0.7"
+tower = { version = "0.5", features = ["util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+glob = "0.3"
+serde_yaml = "0.9"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+portable-pty = "0.8"
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
+which = "7"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+winreg = "0.55"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+tempfile = "3.24.0"

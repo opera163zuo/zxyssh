@@ -1,0 +1,48 @@
+[Unit]
+Description=zxySSH LAN MCP service
+Documentation=file:///usr/share/doc/zxyssh/LAN-MCP-UBUNTU-DEBIAN.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zxyssh
+Group=zxyssh
+
+# /etc/zxyssh/mcp.env sets ZXYSSH_MCP_BIND and ZXYSSH_MCP_ALLOW_LAN.
+# It may also hold no secrets: the service reads saved servers and credentials
+# from its own state directory, and the device key lives beside that database.
+EnvironmentFile=/etc/zxyssh/mcp.env
+ExecStart=/usr/local/bin/zxyssh mcp serve
+
+# systemd creates /var/lib/zxyssh owned by the service user. zxySSH has no
+# dedicated state switch, so the XDG directory is redirected there instead; the
+# database, device keys and session logs all resolve below it.
+StateDirectory=zxyssh
+StateDirectoryMode=0700
+Environment=XDG_DATA_HOME=/var/lib/zxyssh
+Environment=XDG_STATE_HOME=/var/lib/zxyssh
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

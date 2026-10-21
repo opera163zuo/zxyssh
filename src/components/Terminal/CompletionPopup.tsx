@@ -1,0 +1,569 @@
+import { useEffect, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
+import { cn } from '../../lib/utils';
+import { useSettingsStore, themes, type ThemeDefinition } from '../../stores/settingsStore';
+import { categoryInfo, categoryThemeColor, type CommandCategory } from './completionData';
+
+type ThemeColors = ThemeDefinition['colors'];
+
+/**
+ * Resolve a category's accent color from the active theme so badges and icons
+ * follow the user's theme instead of hardcoded hex values.
+ */
+const getCategoryColor = (
+  category: CommandCategory | undefined,
+  themeColors: ThemeColors
+): string => (category ? themeColors[categoryThemeColor[category]] ?? themeColors.accent : themeColors.accent);
+
+/**
+ * Type of completion item for icon display
+ */
+export type CompletionType = 'command' | 'file' | 'directory' | 'history' | 'variable' | 'subcommand';
+
+/**
+ * A single completion item that can be displayed in the popup.
+ */
+export interface CompletionItem {
+  /** The text to insert when this item is selected */
+  text: string;
+  /** Optional description of the item */
+  description?: string;
+  /** Category for visual grouping */
+  category?: CommandCategory;
+  /** Whether this is from command history */
+  isHistory?: boolean;
+  /** Type of completion for icon display */
+  type?: CompletionType;
+  /** Match ranges for highlighting (fuzzy match) */
+  matchRanges?: Array<{ start: number; end: number }>;
+  /** File extension for file items */
+  fileExtension?: string;
+}
+
+interface CompletionPopupProps {
+  /** Array of completion items to display */
+  items: CompletionItem[];
+  /** Currently selected index */
+  selectedIndex: number;
+  /** Callback when an item is selected */
+  onSelect: (item: CompletionItem) => void;
+  /** Callback when selection changes via keyboard */
+  onSelectionChange: (index: number) => void;
+  /** Position relative to cursor (x, y coordinates) */
+  position: { x: number; y: number };
+  /** Whether the popup is visible */
+  visible: boolean;
+  /** Callback to close the popup */
+  onClose: () => void;
+  /** Current input for highlighting */
+  currentInput?: string;
+}
+
+/**
+ * Icon component for different completion types
+ */
+const CompletionIcon = memo(function CompletionIcon({
+  type,
+  category,
+  isHistory,
+  fileExtension,
+  themeColors,
+}: {
+  type?: CompletionType;
+  category?: CommandCategory;
+  isHistory?: boolean;
+  fileExtension?: string;
+  themeColors: ThemeColors;
+}) {
+  // History icon
+  if (isHistory || type === 'history') {
+    return (
+      <svg
+        className="w-4 h-4 flex-shrink-0"
+        viewBox="0 0 16 16"
+        fill="none"
+        style={{ color: themeColors.fgDark }}
+      >
+        <path
+          d="M8 3.5V8l3 1.5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle
+          cx="8"
+          cy="8"
+          r="5.5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <path
+          d="M3 1L1 3"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  // Directory icon
+  if (type === 'directory') {
+    return (
+      <svg
+        className="w-4 h-4 flex-shrink-0"
+        viewBox="0 0 16 16"
+        fill="none"
+        style={{ color: themeColors.yellow }}
+      >
+        <path
+          d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1 2h5.5A1.5 1.5 0 0 1 14 6.5v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-8z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+
+  // File icon with extension-based coloring
+  if (type === 'file') {
+    const getFileColor = () => {
+      if (!fileExtension) return themeColors.fgDark;
+      const ext = fileExtension.toLowerCase();
+      // Color by extension type
+      if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) return themeColors.accent;
+      if (['.py'].includes(ext)) return themeColors.green;
+      if (['.rs'].includes(ext)) return themeColors.orange;
+      if (['.go'].includes(ext)) return themeColors.cyan;
+      if (['.json', '.yaml', '.yml', '.toml'].includes(ext)) return themeColors.yellow;
+      if (['.md', '.txt', '.doc'].includes(ext)) return themeColors.fg;
+      if (['.css', '.scss', '.less'].includes(ext)) return themeColors.magenta;
+      if (['.html', '.htm'].includes(ext)) return themeColors.red;
+      if (['.sh', '.bash', '.zsh'].includes(ext)) return themeColors.green;
+      return themeColors.fgDark;
+    };
+
+    return (
+      <svg
+        className="w-4 h-4 flex-shrink-0"
+        viewBox="0 0 16 16"
+        fill="none"
+        style={{ color: getFileColor() }}
+      >
+        <path
+          d="M4 2h5l4 4v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"
+          stroke="currentColor"
+          strokeWidth="1.3"
+        />
+        <path d="M9 2v4h4" stroke="currentColor" strokeWidth="1.3" />
+      </svg>
+    );
+  }
+
+  // Variable icon
+  if (type === 'variable') {
+    return (
+      <svg
+        className="w-4 h-4 flex-shrink-0"
+        viewBox="0 0 16 16"
+        fill="none"
+        style={{ color: themeColors.magenta }}
+      >
+        <text
+          x="8"
+          y="12"
+          textAnchor="middle"
+          fontSize="11"
+          fontWeight="bold"
+          fill="currentColor"
+        >
+          $
+        </text>
+      </svg>
+    );
+  }
+
+  // Subcommand icon
+  if (type === 'subcommand') {
+    return (
+      <svg
+        className="w-4 h-4 flex-shrink-0"
+        viewBox="0 0 16 16"
+        fill="none"
+        style={{ color: themeColors.accent }}
+      >
+        <path
+          d="M5 4l4 4-4 4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M9 12h4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  // Default command icon with category coloring
+  const categoryColor = getCategoryColor(category, themeColors);
+
+  return (
+    <svg
+      className="w-4 h-4 flex-shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      style={{ color: categoryColor }}
+    >
+      <path
+        d="M2 4l4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 12h6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+});
+
+/**
+ * Highlight matched characters in text
+ */
+const HighlightedText = memo(function HighlightedText({
+  text,
+  matchRanges,
+  input,
+  themeColors,
+}: {
+  text: string;
+  matchRanges?: Array<{ start: number; end: number }>;
+  input?: string;
+  themeColors: ThemeColors;
+}) {
+  // If we have explicit match ranges, use them
+  if (matchRanges && matchRanges.length > 0) {
+    const parts: JSX.Element[] = [];
+    let lastIndex = 0;
+
+    matchRanges.forEach((range, i) => {
+      // Add non-matching part before this range
+      if (range.start > lastIndex) {
+        parts.push(
+          <span key={`pre-${i}`}>{text.slice(lastIndex, range.start)}</span>
+        );
+      }
+      // Add matching part
+      parts.push(
+        <span
+          key={`match-${i}`}
+          style={{ color: themeColors.accent, fontWeight: 600 }}
+        >
+          {text.slice(range.start, range.end)}
+        </span>
+      );
+      lastIndex = range.end;
+    });
+
+    // Add remaining part
+    if (lastIndex < text.length) {
+      parts.push(<span key="end">{text.slice(lastIndex)}</span>);
+    }
+
+    return <>{parts}</>;
+  }
+
+  // Fallback: highlight based on input prefix match
+  if (input) {
+    const inputLower = input.toLowerCase().trim();
+    const textLower = text.toLowerCase();
+    const index = textLower.indexOf(inputLower);
+
+    if (index !== -1) {
+      return (
+        <>
+          {text.slice(0, index)}
+          <span style={{ color: themeColors.accent, fontWeight: 600 }}>
+            {text.slice(index, index + inputLower.length)}
+          </span>
+          {text.slice(index + inputLower.length)}
+        </>
+      );
+    }
+  }
+
+  return <>{text}</>;
+});
+
+/**
+ * CompletionPopup displays command completion suggestions near the cursor.
+ * It supports keyboard navigation and mouse selection with VS Code-style UI.
+ */
+export const CompletionPopup = memo(function CompletionPopup({
+  items,
+  selectedIndex,
+  onSelect,
+  onSelectionChange,
+  position,
+  visible,
+  onClose,
+  currentInput,
+}: CompletionPopupProps) {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLDivElement>(null);
+  const { settings } = useSettingsStore();
+
+  // Get current theme colors
+  const currentTheme = themes.find(t => t.name === settings.appearance.theme);
+  const themeColors = currentTheme?.colors || themes[0].colors;
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (selectedRef.current && popupRef.current) {
+      selectedRef.current.scrollIntoView({
+        block: 'nearest',
+        behavior: 'auto',
+      });
+    }
+  }, [selectedIndex]);
+
+  // Keyboard events are handled in Terminal.tsx's onData handler to avoid
+  // conflicts with xterm.js input processing. This component handles only
+  // mouse interaction (click to select, click outside to close).
+
+  // Handle click outside to close
+  useEffect(() => {
+    if (!visible) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [visible, onClose]);
+
+  if (!visible || items.length === 0) {
+    return null;
+  }
+
+  // Calculate popup position to stay within viewport
+  const maxWidth = 400;
+  const maxHeight = 300;
+  const viewportPadding = 10;
+  const visualViewport = typeof window !== 'undefined' ? window.visualViewport : null;
+  const viewportWidth = visualViewport?.width ?? (typeof window !== 'undefined' ? window.innerWidth : maxWidth);
+  const viewportHeight = visualViewport?.height ?? (typeof window !== 'undefined' ? window.innerHeight : maxHeight);
+  const viewportLeft = visualViewport?.offsetLeft ?? 0;
+  const viewportTop = visualViewport?.offsetTop ?? 0;
+  const popupWidth = Math.max(1, Math.min(maxWidth, viewportWidth - (viewportPadding * 2)));
+  const popupMaxHeight = Math.max(1, Math.min(maxHeight, viewportHeight - (viewportPadding * 2)));
+  const estimatedHeight = Math.min(popupMaxHeight, 38 + (items.length * 34) + 8);
+  let left = position.x;
+  let top = position.y;
+
+  // Ensure popup stays within viewport bounds
+  if (typeof window !== 'undefined') {
+    if (left + popupWidth > viewportLeft + viewportWidth - viewportPadding) {
+      left = viewportLeft + viewportWidth - popupWidth - viewportPadding;
+    }
+    if (left < viewportLeft + viewportPadding) {
+      left = viewportLeft + viewportPadding;
+    }
+    if (top + estimatedHeight > viewportTop + viewportHeight - viewportPadding) {
+      // Position above cursor if not enough space below
+      top = Math.max(viewportTop + viewportPadding, position.y - estimatedHeight - 20);
+    }
+  }
+
+  // Render in a portal to document.body to avoid any CSS stacking/overflow issues
+  return createPortal(
+    <div
+      ref={popupRef}
+      className={cn(
+        'fixed overflow-hidden rounded-lg shadow-2xl',
+        'border border-opacity-40'
+      )}
+      role="listbox"
+      aria-label="Command suggestions"
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${popupWidth}px`,
+        minWidth: `${Math.min(200, popupWidth)}px`,
+        maxWidth: `calc(100vw - ${viewportPadding * 2}px)`,
+        maxHeight: `${popupMaxHeight}px`,
+        zIndex: 99999,
+        backgroundColor: themeColors.bgDark,
+        borderColor: themeColors.bgHl,
+        boxShadow: `0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px ${themeColors.bgHl}`,
+      }}
+    >
+      {/* Header */}
+      <div
+        className="px-3 py-1.5 text-xs font-medium border-b flex items-center justify-between"
+        style={{
+          backgroundColor: themeColors.bg,
+          borderColor: themeColors.bgHl,
+          color: themeColors.fgDark,
+        }}
+      >
+        <span className="flex items-center gap-1.5">
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M2 4l4 4-4 4M8 12h6"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Suggestions
+        </span>
+        <span className="opacity-60 text-xs tabular-nums">
+          {items.length} {items.length === 1 ? 'item' : 'items'}
+        </span>
+      </div>
+
+      {/* Items list */}
+      <div
+        className="overflow-y-auto overflow-x-hidden py-1"
+        style={{ maxHeight: `${Math.max(0, popupMaxHeight - 64)}px` }}
+      >
+        {items.map((item, index) => {
+          const isSelected = index === selectedIndex;
+
+          return (
+            <div
+              key={`${item.text}-${index}`}
+              ref={isSelected ? selectedRef : undefined}
+              className={cn(
+                'flex items-center gap-2.5 px-3 py-1.5 cursor-pointer mx-1 rounded-md',
+                'transition-all duration-75'
+              )}
+              role="option"
+              aria-selected={isSelected}
+              style={{
+                backgroundColor: isSelected ? themeColors.bgHl : 'transparent',
+                transform: isSelected ? 'scale(1)' : 'scale(1)',
+              }}
+              onClick={() => onSelect(item)}
+              onMouseEnter={() => onSelectionChange(index)}
+            >
+              {/* Icon */}
+              <CompletionIcon
+                type={item.type}
+                category={item.category}
+                isHistory={item.isHistory}
+                fileExtension={item.fileExtension}
+                themeColors={themeColors}
+              />
+
+              {/* Content */}
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="font-mono text-sm truncate"
+                    style={{ color: themeColors.fg }}
+                  >
+                    <HighlightedText
+                      text={item.text}
+                      matchRanges={item.matchRanges}
+                      input={currentInput}
+                      themeColors={themeColors}
+                    />
+                  </span>
+                  {item.isHistory && (
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded"
+                      style={{
+                        backgroundColor: `${themeColors.fgDark}20`,
+                        color: themeColors.fgDark,
+                      }}
+                    >
+                      history
+                    </span>
+                  )}
+                </div>
+                {item.description && (
+                  <div
+                    className="text-xs truncate mt-0.5"
+                    style={{ color: themeColors.fgDark }}
+                  >
+                    {item.description}
+                  </div>
+                )}
+              </div>
+
+              {/* Category badge */}
+              {item.category && !item.isHistory && (() => {
+                const badgeColor = getCategoryColor(item.category, themeColors);
+                return (
+                  <div
+                    className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
+                    style={{
+                      backgroundColor: `${badgeColor}15`,
+                      color: badgeColor,
+                    }}
+                  >
+                    {categoryInfo[item.category]?.label || item.category}
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer with keyboard hints */}
+      <div
+        className="px-3 py-1.5 text-xs border-t flex flex-wrap gap-x-4 gap-y-1 items-center"
+        style={{
+          backgroundColor: themeColors.bg,
+          borderColor: themeColors.bgHl,
+          color: themeColors.fgDark,
+        }}
+      >
+        <span className="flex items-center gap-1">
+          <kbd
+            className="px-1.5 py-0.5 rounded text-xs font-mono"
+            style={{ backgroundColor: themeColors.bgHl }}
+          >
+            Tab
+          </kbd>
+          <span className="opacity-80">Accept</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <kbd
+            className="px-1 py-0.5 rounded text-xs font-mono"
+            style={{ backgroundColor: themeColors.bgHl }}
+          >
+            {'\u2191\u2193'}
+          </kbd>
+          <span className="opacity-80">Navigate</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <kbd
+            className="px-1.5 py-0.5 rounded text-xs font-mono"
+            style={{ backgroundColor: themeColors.bgHl }}
+          >
+            Esc
+          </kbd>
+          <span className="opacity-80">Dismiss</span>
+        </span>
+      </div>
+    </div>,
+    document.body
+  );
+});

@@ -1,0 +1,128 @@
+# ============================================
+# Dependencies
+# ============================================
+node_modules/
+
+# ============================================
+# Build outputs
+# ============================================
+dist/
+target/
+out/
+*.bundle
+
+# ============================================
+# IDE & Editors
+# ============================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*~
+.project
+.classpath
+.settings/
+
+# ============================================
+# OS generated
+# ============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================================
+# Environment & secrets
+# ============================================
+.env
+.env.*
+!.env.example
+
+# ============================================
+# Rust / Cargo
+# ============================================
+*.pdb
+*.dll
+*.exe
+*.so
+*.dylib
+!src-tauri/icons/*.ico
+
+# ============================================
+# Tauri bundle artifacts
+# ============================================
+src-tauri/target/
+# Tauri regenerates ACL schemas, while mobile platform projects are source artifacts.
+src-tauri/gen/schemas/
+# Target-suffixed native CLI sidecars are generated before desktop packaging.
+src-tauri/binaries/zxyssh*
+src-tauri/binaries/zxyssh*
+!src-tauri/binaries/.gitkeep
+
+# ============================================
+# Logs & build outputs
+# ============================================
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+build_output.log
+
+# ============================================
+# Test & coverage
+# ============================================
+coverage/
+.nyc_output/
+test-results/
+*.lcov
+tarpaulin-report.html
+
+# ============================================
+# Local scripts & temp files
+# ============================================
+*.bat
+*.cmd
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# Local installer artifacts
+*.msi
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*-setup.exe
+
+# ============================================
+# Package manager caches
+# ============================================
+.npm/
+.pnpm-store/
+.yarn/
+
+# ============================================
+# Misc
+# ============================================
+.omx/
+.impeccable/
+pnpm-lock.yaml
+*.tsbuildinfo
+*.backup.*
+*.debug.*
+.codegraph/
+.zcode/
+
+# Private machine audit reports; publish sanitized product docs instead.
+/docs/PONYTAIL_*.md
+
+# Python release-tool caches
+__pycache__/
+*.py[cod]

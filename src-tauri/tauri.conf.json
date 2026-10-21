@@ -1,0 +1,120 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "zxySSH",
+  "version": "2.0.1",
+  "identifier": "com.zxyssh.desktop",
+  "mainBinaryName": "zxyssh-desktop",
+  "build": {
+    "beforeDevCommand": "node node_modules/vite/bin/vite.js",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "node node_modules/typescript/bin/tsc && node node_modules/vite/bin/vite.js build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "zxySSH",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "devtools": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:* http://127.0.0.1:*",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420 https: http://localhost:* http://127.0.0.1:*"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "license": "GPL-3.0-only",
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../NOTICE": "NOTICE",
+      "../licenses/legacy-MIT.txt": "licenses/legacy-MIT.txt"
+    },
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": [
+          "md",
+          "markdown",
+          "mdx"
+        ],
+        "name": "Markdown document",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "txt",
+          "log",
+          "csv",
+          "json",
+          "yaml",
+          "yml",
+          "toml",
+          "css",
+          "xml",
+          "ini",
+          "conf"
+        ],
+        "name": "Text document",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "svg",
+          "png",
+          "jpg",
+          "jpeg",
+          "gif",
+          "webp",
+          "bmp",
+          "ico",
+          "avif"
+        ],
+        "name": "Image",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "installerHooks": "nsis-hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": [
+          "wix-path-fragment.wxs"
+        ],
+        "componentGroupRefs": [
+          "ZxysshPathEnvGroup"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwREM0QjQ1M0RFNUYwQTYKUldTbThPVTlSVXZjMEh0RWtJWnRhczZBcEhSU2NtbDQ4TTk0emEyWlEwYUhzZ0F3TFdMTVFKcm0K",
+      "endpoints": [
+        "https://github.com/opera163zuo/zxyssh/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

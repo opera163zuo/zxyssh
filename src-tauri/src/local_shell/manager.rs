@@ -1,0 +1,178 @@
+//! Local shell session manager.
+
+use anyhow::{anyhow, Result};
+use log::{error, info, warn};
+use portable_pty::CommandBuilder;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use super::{
+    detect_available_shells, get_default_shell, LocalShellInfo, LocalShellSession, ShellInfo,
+};
+
+/// Manages local shell sessions
+pub struct LocalShellManager {
+    sessions: Arc<RwLock<HashMap<String, Arc<LocalShellSession>>>>,
+}
+
+impl LocalShellManager {
+    /// Create a new local shell manager
+    pub fn new() -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// List all available shells on the system
+    pub fn list_shells(&self) -> Vec<ShellInfo> {
+        detect_available_shells()
+    }
+
+    /// Get the default shell
+    pub fn get_default_shell(&self) -> Option<ShellInfo> {
+        get_default_shell()
+    }
+
+    /// List all active sessions
+    pub async fn list_sessions(&self) -> Vec<LocalShellInfo> {
+        let sessions = self.sessions.read().await;
+        let mut infos = Vec::new();
+        for session in sessions.values() {
+            infos.push(session.get_info().await);
+        }
+        infos
+    }
+
+    /// Get a session by ID
+    pub async fn get_session(&self, id: &str) -> Option<Arc<LocalShellSession>> {
+        let sessions = self.sessions.read().await;
+        sessions.get(id).cloned()
+    }
+
+    /// Create a new local shell session
+    pub async fn create_session(
+        &self,
+        shell_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Arc<LocalShellSession>> {
+        info!(
+            "[LocalShellManager] Creating session for shell: {}",
+            shell_id
+        );
+
+        // Find the shell info
+        let shells = detect_available_shells();
+        let shell_info = shells.iter().find(|s| s.id == shell_id).ok_or_else(|| {
+            error!("[LocalShellManager] Shell not found: {}", shell_id);
+            anyhow!("Shell not found: {}", shell_id)
+        })?;
+
+        let session = LocalShellSession::new(shell_info, cols, rows)?;
+        Ok(self.register_session(session).await)
+    }
+
+    /// Create a PTY-backed session for a known executable and argv.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_process_session(
+        &self,
+        shell_id: String,
+        shell_name: String,
+        cwd: Option<PathBuf>,
+        agent_id: Option<String>,
+        command: CommandBuilder,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Arc<LocalShellSession>> {
+        let session = LocalShellSession::new_process(
+            shell_id, shell_name, cwd, agent_id, command, cols, rows,
+        )?;
+        Ok(self.register_session(session).await)
+    }
+
+    async fn register_session(&self, session: LocalShellSession) -> Arc<LocalShellSession> {
+        let session = Arc::new(session);
+        info!(
+            "[LocalShellManager] Session created with ID: {}",
+            session.id
+        );
+        self.sessions
+            .write()
+            .await
+            .insert(session.id.clone(), session.clone());
+        session
+    }
+
+    /// Create a session with the default shell
+    pub async fn create_default_session(
+        &self,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Arc<LocalShellSession>> {
+        let default_shell = get_default_shell().ok_or_else(|| anyhow!("No default shell found"))?;
+
+        self.create_session(&default_shell.id, cols, rows).await
+    }
+
+    /// Kill a session
+    pub async fn kill_session(&self, id: &str) -> Result<()> {
+        info!("[LocalShellManager] Killing session: {}", id);
+
+        let mut sessions = self.sessions.write().await;
+        if let Some(session) = sessions.remove(id) {
+            session.stop().await?;
+            info!("[LocalShellManager] Session {} killed successfully", id);
+        } else {
+            warn!("[LocalShellManager] Session {} not found for kill", id);
+        }
+
+        Ok(())
+    }
+
+    /// Kill all sessions
+    pub async fn kill_all(&self) -> Result<()> {
+        info!("[LocalShellManager] Killing all sessions");
+
+        let mut sessions = self.sessions.write().await;
+        let count = sessions.len();
+
+        for (id, session) in sessions.iter() {
+            if let Err(e) = session.stop().await {
+                error!("[LocalShellManager] Error stopping session {}: {}", id, e);
+            }
+        }
+
+        sessions.clear();
+        info!("[LocalShellManager] Killed {} sessions", count);
+
+        Ok(())
+    }
+}
+
+impl Default for LocalShellManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn creates_independent_default_shell_sessions_for_split_panes() {
+        let manager = LocalShellManager::new();
+        let first = manager.create_default_session(80, 24).await.unwrap();
+        let second = manager.create_default_session(80, 24).await.unwrap();
+
+        assert_ne!(first.id, second.id);
+        let sessions = manager.list_sessions().await;
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|session| session.id == first.id));
+        assert!(sessions.iter().any(|session| session.id == second.id));
+
+        manager.kill_all().await.unwrap();
+    }
+}

@@ -1,0 +1,1018 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --tokyo-bg: #ffffff;
+    --tokyo-bg-dark: #f7f7f5;
+    --tokyo-bg-hl: #e7e7e3;
+    --tokyo-fg: #171717;
+    --tokyo-fg-dark: #73736e;
+    --tokyo-selection: #e7e7e3;
+    --tokyo-comment: #73736e;
+    --tokyo-red: #b52f3e;
+    --tokyo-green: #18714a;
+    --tokyo-yellow: #805200;
+    --tokyo-blue: #6d4aff;
+    --tokyo-on-accent: #ffffff;
+    --tokyo-magenta: #743796;
+    --tokyo-cyan: #087477;
+    --tokyo-orange: #974117;
+    --app-viewport-height: 100vh;
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  }
+
+  :root[data-theme='ink-black'],
+  :root[data-theme='violet-black'],
+  :root[data-theme='cyan-black'] {
+    --tokyo-red: #ff7b86;
+    --tokyo-green: #63d9a0;
+    --tokyo-yellow: #e7b75f;
+    --tokyo-magenta: #d8a1f0;
+    --tokyo-cyan: #55d6d8;
+    --tokyo-orange: #ff9c68;
+  }
+
+  @supports (height: 100dvh) {
+    :root {
+      --app-viewport-height: 100dvh;
+    }
+  }
+
+  html {
+    width: 100%;
+    height: 100%;
+    background-color: var(--tokyo-bg);
+    overscroll-behavior: none;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    min-height: var(--app-viewport-height);
+    overflow: hidden;
+    background-color: var(--tokyo-bg);
+    color: var(--tokyo-fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--tokyo-fg);
+    letter-spacing: 0;
+    text-wrap: balance;
+  }
+
+  button,
+  [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #root {
+    width: 100%;
+    height: var(--app-viewport-height);
+    overflow: hidden;
+  }
+
+  /* Custom scrollbar for Tokyo Night theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--tokyo-bg-dark);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--tokyo-bg-hl);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--tokyo-comment);
+  }
+
+  /* Selection color */
+  ::selection {
+    background-color: var(--tokyo-selection);
+    color: var(--tokyo-fg);
+  }
+}
+
+/* Syntax colors inherit the active zxySSH theme through its CSS variables. */
+.file-code-editor-input {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--tokyo-fg);
+  tab-size: 2;
+}
+
+.file-code-editor-input::selection {
+  background: var(--tokyo-selection);
+}
+
+.file-code-editor .hljs-comment,
+.file-code-editor .hljs-quote {
+  color: var(--tokyo-comment);
+  font-style: italic;
+}
+
+.file-code-editor .hljs-keyword,
+.file-code-editor .hljs-selector-tag,
+.file-code-editor .hljs-literal,
+.file-code-editor .hljs-type {
+  color: var(--tokyo-magenta);
+}
+
+.file-code-editor .hljs-string,
+.file-code-editor .hljs-regexp,
+.file-code-editor .hljs-addition,
+.file-code-editor .hljs-attribute {
+  color: var(--tokyo-green);
+}
+
+.file-code-editor .hljs-number,
+.file-code-editor .hljs-symbol,
+.file-code-editor .hljs-bullet,
+.file-code-editor .hljs-variable,
+.file-code-editor .hljs-template-variable {
+  color: var(--tokyo-orange);
+}
+
+.file-code-editor .hljs-title,
+.file-code-editor .hljs-section,
+.file-code-editor .hljs-function,
+.file-code-editor .hljs-selector-id,
+.file-code-editor .hljs-selector-class {
+  color: var(--tokyo-blue);
+}
+
+.file-code-editor .hljs-built_in,
+.file-code-editor .hljs-meta,
+.file-code-editor .hljs-link,
+.file-code-editor .hljs-name {
+  color: var(--tokyo-cyan);
+}
+
+.file-code-editor .hljs-deletion {
+  color: var(--tokyo-red);
+}
+
+@layer components {
+  .app-shell {
+    box-sizing: border-box;
+    height: var(--app-viewport-height) !important;
+    min-height: 0;
+    padding-top: var(--safe-area-top);
+    padding-right: var(--safe-area-right);
+    padding-left: var(--safe-area-left);
+    background: linear-gradient(180deg, var(--tokyo-bg-dark) 0%, var(--tokyo-bg) 18%, var(--tokyo-bg) 100%);
+  }
+
+  .responsive-dialog-layer {
+    box-sizing: border-box;
+    padding-top: calc(0.75rem + var(--safe-area-top));
+    padding-right: var(--safe-area-right);
+    padding-bottom: calc(0.75rem + var(--safe-area-bottom));
+    padding-left: var(--safe-area-left);
+  }
+
+  .responsive-dialog-panel {
+    max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - var(--safe-area-bottom) - 1.5rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .responsive-dialog-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--tokyo-bg-dark);
+  }
+
+  .settings-page {
+    box-sizing: border-box;
+    padding-bottom: calc(1.5rem + var(--safe-area-bottom));
+  }
+
+  .settings-control > * {
+    max-width: 100%;
+  }
+
+  .notification-stack {
+    right: calc(1rem + var(--safe-area-right));
+    bottom: calc(1rem + var(--safe-area-bottom));
+    left: calc(1rem + var(--safe-area-left));
+    max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - var(--safe-area-bottom) - 2rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    pointer-events: none;
+  }
+
+  .notification-toast {
+    pointer-events: auto;
+  }
+
+  .terminal-mobile-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .mobile-terminal-keys {
+    display: none;
+    flex-shrink: 0;
+    border-top: 1px solid var(--tokyo-bg-hl);
+    background: var(--tokyo-bg-dark);
+    padding-bottom: var(--safe-area-bottom);
+  }
+
+  .mobile-terminal-keys-scroll {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 6px max(8px, var(--safe-area-right)) 6px max(8px, var(--safe-area-left));
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-terminal-keys-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-terminal-key {
+    display: inline-flex;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--tokyo-bg-hl);
+    border-radius: 6px;
+    background: var(--tokyo-bg);
+    color: var(--tokyo-fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1;
+    touch-action: manipulation;
+    user-select: none;
+  }
+
+  .mobile-terminal-key:active {
+    border-color: var(--tokyo-cyan);
+    background: var(--tokyo-selection);
+    color: var(--tokyo-cyan);
+  }
+
+  .mobile-workspace-menu-item {
+    @apply flex h-11 w-full items-center gap-3 px-3 text-left text-sm text-tokyo-fg;
+    @apply hover:bg-tokyo-bg-hl focus:outline-none focus:ring-1 focus:ring-inset focus:ring-tokyo-blue;
+  }
+
+  .mobile-workspace-menu-item:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  .main-workspace {
+    background: var(--tokyo-bg);
+  }
+
+  .titlebar-shell {
+    @apply bg-tokyo-bg-dark border-b border-tokyo-bg-hl;
+    box-shadow: inset 0 -1px 0 var(--tokyo-bg);
+  }
+
+  .titlebar-brand {
+    @apply flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded-md;
+  }
+
+  .titlebar-session {
+    @apply ml-1 flex h-6 items-center gap-1.5 rounded-md border border-tokyo-bg-hl bg-tokyo-bg px-2 text-xs;
+    max-width: min(36vw, 26rem);
+  }
+
+  .titlebar-drag-gutter {
+    /* Narrow dedicated drag handle instead of a whole-titlebar drag region.
+       Keeping this slim prevents Tauri's native startDragging() from
+       capturing mouse events over interactive titlebar content. */
+    min-width: 0.5rem;
+  }
+
+  .window-controls-macos {
+    @apply flex h-full flex-shrink-0 items-center gap-2 pl-3;
+  }
+
+  .window-control-macos {
+    @apply flex h-3 w-3 items-center justify-center rounded-full border border-tokyo-bg-hl focus:outline-none focus:ring-2 focus:ring-tokyo-cyan;
+  }
+
+  .window-control-macos svg {
+    @apply h-2 w-2 opacity-0 transition-opacity;
+    stroke-width: 3;
+  }
+
+  .window-controls-macos:hover .window-control-macos svg,
+  .window-control-macos:focus-visible svg {
+    @apply opacity-70;
+  }
+
+  .macos-close { @apply bg-tokyo-red text-tokyo-bg-dark; }
+  .macos-minimize { @apply bg-tokyo-yellow text-tokyo-bg-dark; }
+  .macos-maximize { @apply bg-tokyo-green text-tokyo-bg-dark; }
+
+  .window-controls-desktop {
+    @apply flex h-full flex-shrink-0 items-center;
+  }
+
+  .window-control-desktop {
+    @apply flex h-full w-11 items-center justify-center text-tokyo-comment transition-colors duration-150;
+    @apply hover:bg-tokyo-bg-hl hover:text-tokyo-fg focus:outline-none focus:ring-1 focus:ring-inset focus:ring-tokyo-cyan;
+  }
+
+  .window-control-desktop svg {
+    @apply h-3.5 w-3.5;
+  }
+
+  .window-controls-desktop.is-linux {
+    @apply gap-1 pr-2;
+  }
+
+  .window-controls-desktop.is-linux .window-control-desktop {
+    @apply h-7 w-7 rounded-full border border-tokyo-bg-hl bg-tokyo-bg;
+  }
+
+  .window-control-close:hover {
+    @apply bg-tokyo-red text-white;
+  }
+
+  .kbd-chip {
+    @apply flex-shrink-0 rounded border border-tokyo-bg-hl bg-tokyo-bg px-1.5 py-0.5 text-[10px] leading-none text-tokyo-comment;
+  }
+
+  .session-tabbar {
+    box-shadow:
+      inset 0 -1px 0 var(--tokyo-bg-hl),
+      0 1px 8px color-mix(in srgb, var(--tokyo-fg) 5%, transparent);
+  }
+
+  .session-rail {
+    @apply flex h-8 flex-shrink-0 items-center gap-2 rounded-lg border border-tokyo-bg-hl bg-tokyo-bg px-2 text-[10px] text-tokyo-comment;
+  }
+
+  .session-rail-bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+  }
+
+  .session-rail-bars i {
+    display: block;
+    width: 2px;
+    border-radius: 999px;
+    background: var(--tokyo-cyan);
+    opacity: 0.45;
+  }
+
+  .session-rail-bars i:nth-child(1) {
+    height: 5px;
+  }
+
+  .session-rail-bars i:nth-child(2) {
+    height: 9px;
+    background: var(--tokyo-cyan);
+    opacity: 1;
+  }
+
+  .session-rail-bars i:nth-child(3) {
+    height: 7px;
+    background: var(--tokyo-cyan);
+    opacity: 0.7;
+  }
+
+  .session-rail-count {
+    min-width: 1ch;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .terminal-card {
+    @apply overflow-hidden rounded-lg border border-tokyo-bg-hl bg-tokyo-bg;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--tokyo-fg) 5%, transparent),
+      0 8px 24px color-mix(in srgb, var(--tokyo-fg) 7%, transparent);
+  }
+
+  .terminal-viewport {
+    background:
+      linear-gradient(180deg, var(--tokyo-bg) 0%, var(--tokyo-bg-dark) 100%);
+  }
+
+  .terminal-viewport::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px var(--tokyo-bg);
+  }
+
+  .server-signal {
+    display: grid;
+    grid-template-columns: repeat(2, 5px);
+    gap: 3px;
+    padding: 5px;
+    border: 1px solid var(--tokyo-bg-hl);
+    border-radius: 8px;
+    background: var(--tokyo-bg);
+  }
+
+  .server-signal span {
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--tokyo-bg-hl);
+  }
+
+  .server-signal span.is-on {
+    background: var(--tokyo-green);
+  }
+
+  .workspace-action {
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-transparent px-2.5 text-xs font-medium text-tokyo-comment;
+    @apply transition-colors duration-150 hover:border-tokyo-bg-hl hover:bg-tokyo-bg hover:text-tokyo-fg;
+    @apply focus:outline-none focus:ring-1 focus:ring-tokyo-blue;
+  }
+
+  .workspace-action.is-active {
+    @apply border-tokyo-bg-hl bg-tokyo-selection text-tokyo-fg;
+  }
+
+  .icon-button {
+    @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-tokyo-comment;
+    @apply transition-colors duration-150 hover:bg-tokyo-bg-hl hover:text-tokyo-fg;
+    @apply focus:outline-none focus:ring-1 focus:ring-tokyo-blue;
+  }
+
+  .icon-button.is-active {
+    @apply bg-tokyo-selection text-tokyo-fg;
+  }
+
+  .icon-button:disabled {
+    @apply cursor-wait opacity-60;
+  }
+
+  .tooltip-button {
+    position: relative;
+  }
+
+  .tooltip-button::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: calc(100% + 7px);
+    right: 0;
+    z-index: 70;
+    width: max-content;
+    max-width: 220px;
+    padding: 5px 8px;
+    border: 1px solid var(--tokyo-bg-hl);
+    border-radius: 5px;
+    background: var(--tokyo-fg);
+    color: var(--tokyo-bg);
+    font-size: 11px;
+    line-height: 1.25;
+    letter-spacing: 0;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px);
+    transition: opacity 120ms ease, transform 120ms ease;
+    transition-delay: 300ms;
+  }
+
+  .tooltip-button:hover::after,
+  .tooltip-button:focus-visible::after {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .connection-marquee-track {
+    animation: connection-marquee 28s linear infinite;
+  }
+
+  .connection-marquee:hover .connection-marquee-track {
+    animation-play-state: paused;
+  }
+
+  /* Sidebar action button styles */
+  .sidebar-action-btn {
+    @apply flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm text-tokyo-fg transition-colors duration-150;
+    @apply hover:bg-tokyo-bg-hl hover:text-tokyo-fg;
+  }
+
+  /* Tab styles */
+  .session-tab {
+    @apply flex items-center gap-2 px-3 py-1.5 rounded-t-md text-sm transition-colors duration-150;
+    @apply text-tokyo-fg-dark hover:text-tokyo-fg;
+  }
+
+  .session-tab.active {
+    @apply bg-tokyo-bg text-tokyo-blue border-b-2 border-tokyo-blue;
+  }
+}
+
+@layer utilities {
+  @keyframes connection-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  /* Toast slide-in animation */
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.3s ease-out;
+  }
+}
+
+@media (max-width: 639px) {
+  .responsive-dialog-layer {
+    align-items: stretch;
+  }
+
+  .responsive-dialog-panel {
+    align-self: center;
+    max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - var(--safe-area-bottom) - 1.5rem);
+  }
+
+  .responsive-dialog-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .responsive-dialog-actions > button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .settings-page {
+    padding-bottom: calc(1rem + var(--safe-area-bottom));
+  }
+}
+
+@media (max-width: 767px) {
+  .session-tabbar {
+    min-height: 44px;
+    height: auto;
+  }
+
+  .session-rail {
+    display: none;
+  }
+
+  .sftp-panel-shell:not([aria-hidden="true"]),
+  .agent-activity-panel:not(.hidden) {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 45 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    border: 0 !important;
+  }
+
+  .sftp-panel-shell[aria-hidden="true"] {
+    width: 0 !important;
+  }
+
+  .sftp-resize-handle {
+    display: none !important;
+  }
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  .mobile-terminal-keys {
+    display: block;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .session-tabbar {
+    min-height: 52px;
+  }
+
+  .session-tab-item {
+    height: 44px;
+    min-width: 148px;
+    max-width: 280px;
+    touch-action: manipulation;
+  }
+
+  .session-tab-action {
+    width: 44px;
+    height: 44px;
+    opacity: 1 !important;
+    touch-action: manipulation;
+  }
+
+  .session-new-action {
+    width: 44px;
+    height: 44px;
+    touch-action: manipulation;
+  }
+
+  .responsive-dialog-panel button,
+  .settings-page button:not([role="switch"]),
+  .settings-page a,
+  .notification-dismiss,
+  [role="option"] {
+    min-height: 44px;
+  }
+
+  .responsive-dialog-header > button,
+  .settings-page button:not([role="switch"]),
+  .notification-dismiss {
+    min-width: 44px;
+  }
+
+  .settings-control [role="switch"]::before {
+    content: "";
+    position: absolute;
+    inset: -10px 0;
+  }
+
+  .responsive-dialog-panel input:not([type="checkbox"]):not([type="radio"]),
+  .responsive-dialog-panel select,
+  .settings-page input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .settings-page select {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+.workspace-changes-panel {
+  width: min(48vw, 48rem);
+  min-width: min(26rem, 48vw);
+}
+
+.workspace-diff-hunk {
+  background: color-mix(in srgb, var(--tokyo-blue) 9%, var(--tokyo-bg-dark));
+}
+
+.workspace-diff-line {
+  min-height: 20px;
+}
+
+.workspace-diff-line-context {
+  background: var(--tokyo-bg);
+}
+
+.workspace-diff-line-add {
+  background: color-mix(in srgb, var(--tokyo-green) 12%, var(--tokyo-bg));
+  color: var(--tokyo-fg);
+}
+
+.workspace-diff-line-delete {
+  background: color-mix(in srgb, var(--tokyo-red) 12%, var(--tokyo-bg));
+  color: var(--tokyo-fg);
+}
+
+.workspace-diff-line-number {
+  border-right: 1px solid var(--tokyo-bg-hl);
+  padding: 0 0.5rem;
+  text-align: right;
+  color: var(--tokyo-comment);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .workspace-changes-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 30;
+    width: min(100%, 48rem);
+    min-width: 0;
+    box-shadow: -4px 0 8px color-mix(in srgb, var(--tokyo-fg) 10%, transparent);
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-changes-panel {
+    width: 100%;
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .workspace-changes-content {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 10rem minmax(0, 1fr);
+  }
+
+  .workspace-changes-files {
+    border-right: 0;
+    border-bottom: 1px solid var(--tokyo-bg-hl);
+  }
+
+  .coding-agent-launcher {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .coding-agent-launcher > aside {
+    border-right: 0;
+    border-bottom: 1px solid var(--tokyo-bg-hl);
+  }
+
+  .coding-agent-tool-list {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .coding-agent-tool {
+    width: 12rem;
+    min-width: 12rem;
+    border-right: 1px solid var(--tokyo-bg-hl);
+  }
+}
+
+/* xterm.js scrolling fixes */
+.xterm {
+  height: 100%;
+  width: 100%;
+}
+
+.xterm-viewport {
+  /* Ensure vertical scrolling is enabled */
+  overflow-y: scroll !important;
+  /* Use auto for horizontal to avoid unnecessary scrollbar */
+  overflow-x: hidden !important;
+}
+
+.xterm-screen {
+  /* Ensure screen content can grow beyond viewport */
+  height: 100%;
+}
+
+/* Ensure xterm viewport scrollbar styling */
+.xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+
+.xterm-viewport::-webkit-scrollbar-track {
+  background: var(--tokyo-bg-dark);
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--tokyo-bg-hl);
+  border-radius: 5px;
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--tokyo-comment);
+}
+
+/* =========================================================================
+   Mosaic pane layout (react-mosaic-component2)
+   Adapted to the Tokyo Night theme so split panes blend with the rest of the UI.
+   ========================================================================= */
+.mosaic-container {
+  background: var(--tokyo-bg-dark);
+}
+
+.mosaic {
+  background: var(--tokyo-bg-dark);
+  gap: 4px;
+}
+
+.mosaic-tile {
+  margin: 0;
+}
+
+.mosaic-window,
+.mosaic-window-body {
+  background: var(--tokyo-bg);
+}
+
+.mosaic-window {
+  border: 1px solid var(--tokyo-bg-hl);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mosaic-window.mosaic-window-active {
+  border-color: var(--tokyo-cyan);
+}
+
+.mosaic-window-title {
+  font-size: 11px;
+  color: var(--tokyo-fg);
+  background: var(--tokyo-bg-dark);
+  border-bottom: 1px solid var(--tokyo-bg-hl);
+  padding: 0 8px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+/* The toolbar is the drag handle for rearranging panes. Make it visually
+   obvious that it's draggable, and give it a generous hit area. */
+.mosaic-window-toolbar.draggable {
+  cursor: move;
+  user-select: none;
+}
+
+.mosaic-window-toolbar.draggable:hover {
+  background: color-mix(in srgb, var(--tokyo-bg-hl) 50%, var(--tokyo-bg-dark));
+}
+
+.mosaic-window-toolbar {
+  background: var(--tokyo-bg-dark);
+  border-bottom: 1px solid var(--tokyo-bg-hl);
+}
+
+.mosaic-window-toolbar .icon-button {
+  opacity: 0.6;
+}
+
+.mosaic-window-toolbar .icon-button:hover {
+  opacity: 1;
+}
+
+/* The draggable divider between panes. */
+.mosaic-split {
+  background: var(--tokyo-bg-hl);
+  width: 4px;
+}
+
+.mosaic-split:hover,
+.mosaic-split.mosaic-split--dragging {
+  background: var(--tokyo-cyan);
+}
+
+/* Drop target highlights when dragging a pane onto another pane's edge.
+   These are the blue zones that appear at the top/bottom/left/right of a
+   target window during a drag — they tell the user where the pane will land. */
+.mosaic-drop-target .drop-target-container .drop-target {
+  background: color-mix(in srgb, var(--tokyo-cyan) 35%, transparent);
+  border: 2px solid var(--tokyo-cyan);
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.mosaic-drop-target .drop-target-container .drop-target.drop-target-hover {
+  background: color-mix(in srgb, var(--tokyo-cyan) 55%, transparent);
+}
+
+@layer components {
+  .plugin-category-button {
+    @apply flex h-9 w-full items-center justify-between rounded-md px-2.5 text-left text-xs text-tokyo-comment transition-colors;
+  }
+
+  .plugin-category-button:hover {
+    @apply bg-tokyo-bg-hl text-tokyo-fg;
+  }
+
+  .plugin-category-button.is-active {
+    @apply bg-tokyo-bg text-tokyo-fg;
+    box-shadow: inset 2px 0 0 var(--tokyo-cyan);
+  }
+
+  .plugin-market-card {
+    border-radius: 8px;
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--tokyo-fg) 5%, transparent);
+    transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  }
+
+  .plugin-market-card:hover {
+    border-color: var(--tokyo-comment);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px color-mix(in srgb, var(--tokyo-fg) 8%, transparent);
+  }
+
+  .plugin-toggle-input {
+    width: 30px;
+    height: 16px;
+    appearance: none;
+    cursor: pointer;
+    border: 1px solid var(--tokyo-bg-hl);
+    border-radius: 999px;
+    background: var(--tokyo-bg-hl);
+    position: relative;
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+
+  .plugin-toggle-input::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--tokyo-bg);
+    transition: transform 150ms ease;
+  }
+
+  .plugin-toggle-input:checked {
+    border-color: var(--tokyo-green);
+    background: var(--tokyo-green);
+  }
+
+  .plugin-toggle-input:checked::after {
+    transform: translateX(14px);
+  }
+
+  .plugin-toggle-input:focus-visible {
+    outline: 2px solid var(--tokyo-cyan);
+    outline-offset: 2px;
+  }
+}
+
+/* Mouse-driven tab drag (see lib/tabDragController.ts) */
+body.tab-dragging,
+body.tab-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.pane-drop-hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  border: 2px solid var(--tokyo-cyan);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tokyo-cyan) 18%, transparent);
+}
+.pane-drop-hover[data-dock-side='left']::after { right: 50%; }
+.pane-drop-hover[data-dock-side='right']::after { left: 50%; }
+.pane-drop-hover[data-dock-side='top']::after { bottom: 50%; }
+.pane-drop-hover[data-dock-side='bottom']::after { top: 50%; }
+.dock-tab-hover { box-shadow: inset 0 0 0 2px var(--tokyo-cyan); }
+
+body.detached-window-dragging,
+body.detached-window-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.tab-drag-source {
+  opacity: 0.45;
+}
+
+/* Checkerboard backdrop for transparent image previews (SFTP PreviewModal).
+   Uses theme variables so it adapts to the active theme. */
+.checkerboard-bg {
+  background-image:
+    linear-gradient(45deg, var(--tokyo-bg-hl) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--tokyo-bg-hl) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--tokyo-bg-hl) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--tokyo-bg-hl) 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}

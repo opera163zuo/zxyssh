@@ -1,0 +1,304 @@
+//! Install and remove the native zxySSH CLI skill for AI coding tools.
+
+use anyhow::{anyhow, Context, Result};
+use std::fs;
+use std::path::PathBuf;
+
+use super::detector::{
+    find_tool, skill_dir_candidates_for_tool, skill_install_dirs_for_tool, AiTool,
+};
+
+const SKILL_DIR_NAME: &str = "zxyssh";
+// Only the uninstall path still looks for these: a machine that installed the
+// pre-rebrand Skill must be able to remove those directories.
+const PREVIOUS_SKILL_DIR_NAMES: [&str; 2] = ["vibeshell", "vshell"];
+const NATIVE_SKILL_MD_TEMPLATE: &str = include_str!("../../../skills/zxyssh/SKILL.md");
+
+fn render_skill_md() -> Result<String> {
+    Ok(NATIVE_SKILL_MD_TEMPLATE.to_string())
+}
+
+fn install_skill_file(tool_id: &str) -> Result<Vec<PathBuf>> {
+    let skills_dirs = skill_install_dirs_for_tool(tool_id)
+        .ok_or_else(|| anyhow!("No skills directory known for tool: {}", tool_id))?;
+    install_skill_file_to_dirs(skills_dirs)
+}
+
+fn write_if_changed(path: &PathBuf, content: &str) -> Result<()> {
+    if fs::read_to_string(path)
+        .map(|existing| existing == content)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    fs::write(path, content).with_context(|| format!("Failed to write skill file {:?}", path))
+}
+
+fn install_skill_file_to_dirs(skills_dirs: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+    let skill_content = render_skill_md()?;
+    let references = crate::plugins::builtin_catalog()
+        .map_err(anyhow::Error::msg)?
+        .into_iter()
+        .map(|manifest| {
+            let reference =
+                crate::plugins::agent_reference(&manifest).map_err(anyhow::Error::msg)?;
+            Ok((manifest.id, reference))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut installed_paths = Vec::new();
+
+    for skills_dir in skills_dirs {
+        let skill_dir = skills_dir.join(SKILL_DIR_NAME);
+        fs::create_dir_all(&skill_dir)
+            .with_context(|| format!("Failed to create skill directory {:?}", skill_dir))?;
+
+        let skill_path = skill_dir.join("SKILL.md");
+        // Write referenced content before publishing the main entry point.
+        let reference_dir = skill_dir.join("references");
+        fs::create_dir_all(&reference_dir)?;
+        for (id, content) in &references {
+            write_if_changed(&reference_dir.join(format!("{id}.md")), content)?;
+        }
+        write_if_changed(&skill_path, &skill_content)?;
+
+        // Remove the obsolete Node gateway helper from prior installations. The
+        // native skill talks directly to the `zxyssh` executable.
+        let legacy_gateway = skill_dir.join("gateway.mjs");
+        if legacy_gateway.exists() {
+            fs::remove_file(&legacy_gateway).with_context(|| {
+                format!(
+                    "Failed to remove legacy gateway client {:?}",
+                    legacy_gateway
+                )
+            })?;
+        }
+
+        // Erase the pre-rebrand Skill directories so the old brand stops being
+        // advertised to coding agents once the current one is installed.
+        for previous_name in PREVIOUS_SKILL_DIR_NAMES {
+            let previous_skill_dir = skills_dir.join(previous_name);
+            if previous_skill_dir.exists() && previous_skill_dir != skill_dir {
+                fs::remove_dir_all(&previous_skill_dir).with_context(|| {
+                    format!(
+                        "Failed to remove the previous skill directory {:?}",
+                        previous_skill_dir
+                    )
+                })?;
+            }
+        }
+
+        log::info!(
+            "[Install] Native zxySSH skill installed to {:?}",
+            skill_path
+        );
+        installed_paths.push(skill_path);
+    }
+
+    Ok(installed_paths)
+}
+
+fn uninstall_skill_file(tool_id: &str) -> Result<()> {
+    if let Some(skills_dirs) = skill_dir_candidates_for_tool(tool_id) {
+        for skills_dir in skills_dirs {
+            for dir_name in [SKILL_DIR_NAME]
+                .iter()
+                .chain(PREVIOUS_SKILL_DIR_NAMES.iter())
+            {
+                let skill_dir = skills_dir.join(dir_name);
+                if skill_dir.exists() {
+                    fs::remove_dir_all(&skill_dir).with_context(|| {
+                        format!("Failed to remove skill directory {:?}", skill_dir)
+                    })?;
+                    log::info!("[Install] zxySSH skill removed from {:?}", skill_dir);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct InstallResult {
+    pub tool: AiTool,
+    pub success: bool,
+    pub backup_path: Option<PathBuf>,
+    pub error: Option<String>,
+}
+
+pub fn install_to_tool(tool_id: &str, _config_path: &PathBuf) -> Result<Option<PathBuf>> {
+    let skill_paths = install_skill_file(tool_id)?;
+    Ok(skill_paths.into_iter().next())
+}
+
+pub fn uninstall_from_tool(tool_id: &str, _config_path: &PathBuf) -> Result<Option<PathBuf>> {
+    uninstall_skill_file(tool_id)?;
+    Ok(None)
+}
+
+pub fn install_by_id(tool_id: &str) -> Result<InstallResult> {
+    let tool = find_tool(tool_id).ok_or_else(|| anyhow!("Unknown tool: {}", tool_id))?;
+    match install_to_tool(&tool.id, &tool.config_path) {
+        Ok(path) => Ok(InstallResult {
+            tool,
+            success: true,
+            backup_path: path,
+            error: None,
+        }),
+        Err(error) => Ok(InstallResult {
+            tool,
+            success: false,
+            backup_path: None,
+            error: Some(error.to_string()),
+        }),
+    }
+}
+
+pub fn uninstall_by_id(tool_id: &str) -> Result<InstallResult> {
+    let tool = find_tool(tool_id).ok_or_else(|| anyhow!("Unknown tool: {}", tool_id))?;
+    match uninstall_from_tool(&tool.id, &tool.config_path) {
+        Ok(_) => Ok(InstallResult {
+            tool,
+            success: true,
+            backup_path: None,
+            error: None,
+        }),
+        Err(error) => Ok(InstallResult {
+            tool,
+            success: false,
+            backup_path: None,
+            error: Some(error.to_string()),
+        }),
+    }
+}
+
+pub fn install_to_all() -> Vec<InstallResult> {
+    use super::detector::get_default_install_tools;
+
+    get_default_install_tools()
+        .into_iter()
+        .map(|tool| match install_to_tool(&tool.id, &tool.config_path) {
+            Ok(path) => InstallResult {
+                tool,
+                success: true,
+                backup_path: path,
+                error: None,
+            },
+            Err(error) => InstallResult {
+                tool,
+                success: false,
+                backup_path: None,
+                error: Some(error.to_string()),
+            },
+        })
+        .collect()
+}
+
+pub fn uninstall_from_all() -> Vec<InstallResult> {
+    use super::detector::get_configured_tools;
+
+    get_configured_tools()
+        .into_iter()
+        .map(
+            |tool| match uninstall_from_tool(&tool.id, &tool.config_path) {
+                Ok(_) => InstallResult {
+                    tool,
+                    success: true,
+                    backup_path: None,
+                    error: None,
+                },
+                Err(error) => InstallResult {
+                    tool,
+                    success: false,
+                    backup_path: None,
+                    error: Some(error.to_string()),
+                },
+            },
+        )
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn skill_content_uses_the_mcp_contract() {
+        let content = render_skill_md().unwrap();
+        for required in [
+            "name: zxyssh",
+            "MCP endpoint",
+            "zxyssh mcp pair-code",
+            "zxyssh mcp agents",
+            "zxyssh mcp hostkey probe",
+            "server_list",
+            "session_create",
+            "session_sudo",
+            "ZXYSSH_MCP_ALLOW_LAN",
+        ] {
+            assert!(content.contains(required), "missing {required}");
+        }
+        for removed in [
+            "zxyssh ssh ",
+            "zxyssh servers",
+            "zxyssh sessions",
+            "zxyssh sftp",
+            "zxyssh import",
+            "zxyssh plugins",
+            "zxyssh daemon",
+            "headless daemon",
+        ] {
+            assert!(!content.contains(removed), "stale command {removed}");
+        }
+        assert!(!content.contains("node gateway.mjs"));
+        assert!(!content.contains("Agent Gateway"));
+        assert!(!content.contains("agent-gateway.json"));
+    }
+
+    #[test]
+    fn repository_skill_mirrors_stay_in_sync() {
+        let canonical = render_skill_md().unwrap();
+        assert_eq!(
+            canonical,
+            include_str!("../../../.claude/skills/zxyssh/SKILL.md")
+        );
+        assert_eq!(
+            canonical,
+            include_str!("../../../.codex/skills/zxyssh/SKILL.md")
+        );
+    }
+
+    #[test]
+    fn skill_install_is_confined_to_injected_directories() {
+        let dir = TempDir::new().unwrap();
+        let skills_dir = dir.path().join("skills");
+        let installed = install_skill_file_to_dirs(vec![skills_dir.clone()]).unwrap();
+        let skill_path = skills_dir.join(SKILL_DIR_NAME).join("SKILL.md");
+
+        assert_eq!(installed, vec![skill_path.clone()]);
+        let content = fs::read_to_string(skill_path).unwrap();
+        assert!(content.contains("name: zxyssh"));
+        assert!(content.contains("MCP endpoint"));
+        assert!(!skills_dir.join(SKILL_DIR_NAME).join("gateway.mjs").exists());
+        for manifest in crate::plugins::builtin_catalog().unwrap() {
+            let relative = format!("references/{}.md", manifest.id);
+            assert!(
+                content.contains(&relative),
+                "missing main Skill index entry {}",
+                manifest.id
+            );
+            let reference =
+                fs::read_to_string(skills_dir.join(SKILL_DIR_NAME).join(relative)).unwrap();
+            assert_eq!(
+                reference,
+                crate::plugins::agent_reference(&manifest).unwrap()
+            );
+            assert!(reference.contains("## Running this from the MCP service"));
+            for action in crate::plugins::agent_actions(&manifest) {
+                assert!(reference.contains(&format!("## `{}`", action["id"].as_str().unwrap())));
+            }
+        }
+        // A repeated install must remain complete and not append duplicate docs.
+        install_skill_file_to_dirs(vec![skills_dir]).unwrap();
+    }
+}

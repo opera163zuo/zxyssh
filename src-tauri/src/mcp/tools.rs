@@ -1,0 +1,1097 @@
+//! MCP Tool Definitions
+//!
+//! Defines all tools exposed by the zxySSH MCP server for AI assistants.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+/// Represents a tool definition in the MCP protocol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    /// Unique name of the tool
+    pub name: String,
+    /// Human-readable description of what the tool does
+    pub description: String,
+    /// JSON Schema describing the tool's input parameters
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
+}
+
+impl ToolDefinition {
+    /// Create a new tool definition
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            input_schema,
+        }
+    }
+}
+
+/// Returns the SSH, session, command and SFTP tools required by the headless service.
+pub fn get_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        server_list_tool(),
+        server_add_tool(),
+        server_get_tool(),
+        server_update_tool(),
+        server_delete_tool(),
+        session_list_tool(),
+        session_create_tool(),
+        session_attach_tool(),
+        session_detach_tool(),
+        session_kill_tool(),
+        session_send_input_tool(),
+        session_sudo_tool(),
+        session_read_tool(),
+        session_resize_tool(),
+        exec_tool(),
+        remote_rg_tool(),
+        sftp_ls_tool(),
+        sftp_upload_tool(),
+        sftp_upload_directory_tool(),
+        sftp_sync_directory_tool(),
+        sftp_download_tool(),
+        sftp_mkdir_tool(),
+        sftp_rm_tool(),
+        sftp_mv_tool(),
+        sftp_read_tool(),
+        sftp_write_tool(),
+        get_content_tool(),
+        edit_file_tool(),
+        add_file_tool(),
+    ]
+}
+
+/// Returns the minimal tool surface available to paired HTTP Agents.
+pub fn get_agent_tool_definitions() -> Vec<ToolDefinition> {
+    const AGENT_TOOLS: &[&str] = &[
+        "server_list",
+        "session_create",
+        "session_send_input",
+        "session_sudo",
+        "session_read",
+        "session_resize",
+        "session_kill",
+    ];
+    get_tool_definitions()
+        .into_iter()
+        .filter(|tool| AGENT_TOOLS.contains(&tool.name.as_str()))
+        .map(|mut tool| {
+            if tool.name == "session_create" {
+                if let Some(schema) = tool.input_schema.as_object_mut() {
+                    if let Some(properties) =
+                        schema.get_mut("properties").and_then(Value::as_object_mut)
+                    {
+                        properties.remove("server_id");
+                    }
+                    schema.insert("required".into(), json!(["server_name"]));
+                }
+            }
+            tool
+        })
+        .collect()
+}
+
+pub fn get_compact_agent_tool_definitions() -> Vec<ToolDefinition> {
+    get_agent_tool_definitions()
+        .into_iter()
+        .map(|mut tool| {
+            tool.description = compact_description(&tool.name);
+            compact_schema(&mut tool.input_schema);
+            tool
+        })
+        .collect()
+}
+
+pub fn is_agent_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "server_list"
+            | "session_create"
+            | "session_send_input"
+            | "session_sudo"
+            | "session_read"
+            | "session_resize"
+            | "session_kill"
+    )
+}
+
+/// Compact definitions for agents that already know the Gateway workflow.
+/// Keep names and schema semantics, but remove prose that is repeated on every
+/// connection and every `tools/list` response.
+pub fn get_compact_tool_definitions() -> Vec<ToolDefinition> {
+    get_tool_definitions()
+        .into_iter()
+        .map(|mut tool| {
+            tool.description = compact_description(&tool.name);
+            compact_schema(&mut tool.input_schema);
+            tool
+        })
+        .collect()
+}
+
+fn compact_description(name: &str) -> String {
+    match name {
+        "session_send_input" => "Send visible terminal input (approval-gated).".to_string(),
+        "session_sudo" => "Run a server-configured non-interactive sudo command.".to_string(),
+        "session_read" => "Read recent visible terminal output.".to_string(),
+        "exec" => "Run isolated SSH command (approval-gated).".to_string(),
+        "server_list" => "List saved servers.".to_string(),
+        "session_list" => "List sessions.".to_string(),
+        _ => name.replace('_', " "),
+    }
+}
+
+fn compact_schema(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("description");
+            map.remove("default");
+            map.remove("title");
+            for child in map.values_mut() {
+                compact_schema(child);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(compact_schema),
+        _ => {}
+    }
+}
+
+// === Server Management Tools ===
+
+fn server_list_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "server_list",
+        "List all configured SSH servers. Optionally filter by group or tags.",
+        json!({
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "string",
+                    "description": "Filter servers by group ID"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Filter servers that have any of these tags"
+                }
+            },
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn server_add_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "server_add",
+        "Add a new SSH server configuration.",
+        json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Unique name for the server"
+                },
+                "host": {
+                    "type": "string",
+                    "description": "Hostname or IP address"
+                },
+                "port": {
+                    "type": "integer",
+                    "description": "SSH port (default: 22)",
+                    "default": 22
+                },
+                "username": {
+                    "type": "string",
+                    "description": "SSH username"
+                },
+                "auth_type": {
+                    "type": "string",
+                    "enum": ["password", "key", "key_with_passphrase"],
+                    "description": "Authentication type"
+                },
+                "group_id": {
+                    "type": "string",
+                    "description": "Optional group ID to organize servers"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Tags for organizing and filtering servers"
+                }
+            },
+            "required": ["name", "host", "username", "auth_type"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn server_get_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "server_get",
+        "Get details of a specific SSH server by ID or name.",
+        json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Server ID"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Server name (used if id not provided)"
+                }
+            },
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn server_update_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "server_update",
+        "Update an existing SSH server configuration.",
+        json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Server ID to update"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "New name for the server"
+                },
+                "host": {
+                    "type": "string",
+                    "description": "New hostname or IP address"
+                },
+                "port": {
+                    "type": "integer",
+                    "description": "New SSH port"
+                },
+                "username": {
+                    "type": "string",
+                    "description": "New SSH username"
+                },
+                "auth_type": {
+                    "type": "string",
+                    "enum": ["password", "key", "key_with_passphrase"],
+                    "description": "New authentication type"
+                },
+                "group_id": {
+                    "type": "string",
+                    "description": "New group ID"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "New tags"
+                }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn server_delete_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "server_delete",
+        "Delete an SSH server configuration.",
+        json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Server ID to delete"
+                }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+// === Session Management Tools ===
+
+fn session_list_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_list",
+        "List all active SSH sessions.",
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_create_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_create",
+        "Connect to a configured server using saved credentials and return a shared GUI session. Reuses the earliest connected session unless force_new is true.",
+        json!({
+            "type": "object",
+            "properties": {
+                "server_id": {
+                    "type": "string",
+                    "description": "Server ID to connect to"
+                },
+                "server_name": {
+                    "type": "string",
+                    "description": "Server name to connect to (used if server_id not provided)"
+                },
+                "force_new": {
+                    "type": "boolean",
+                    "description": "Create a parallel session instead of reusing a connected session",
+                    "default": false
+                }
+            },
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_attach_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_attach",
+        "Attach to an existing SSH session to receive output.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to attach to"
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_detach_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_detach",
+        "Detach from an SSH session.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to detach from"
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_kill_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_kill",
+        "Terminate an SSH session.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to terminate"
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "Terminate all sessions",
+                    "default": false
+                }
+            },
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_send_input_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_send_input",
+        "Send text or named keys to the shared terminal PTY. Prefer this for collaborative work: the human sees the AI command in a distinct color and shares the same shell state, working directory, environment, and output.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID receiving terminal input"
+                },
+                "data": {
+                    "type": "string",
+                    "description": "Literal terminal input"
+                },
+                "sensitive": {
+                    "type": "boolean",
+                    "description": "Redact secret/password input from UI command notices and audit. Persists across split calls until Enter. Does not bypass approval."
+                },
+                "keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["enter", "tab", "escape", "backspace", "ctrl-c", "ctrl-d", "ctrl-z", "up", "down", "left", "right"]
+                    },
+                    "description": "Named terminal keys appended after data"
+                },
+                "append_enter": {
+                    "type": "boolean",
+                    "description": "Append Enter after data and named keys",
+                    "default": false
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_sudo_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_sudo",
+        "Run a configured sudo command through a non-interactive SSH exec channel; the sudo password is held by the server and never returned.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "command": {"type": "string", "description": "Command to run as root through the configured sudo policy"}
+            },
+            "required": ["session_id", "command"],
+            "additionalProperties": false
+        }),
+    )
+}
+fn session_read_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_read",
+        "Read the latest buffered output from the shared terminal. Returns at most 64 KiB and does not consume the GUI output.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to inspect"
+                },
+                "max_bytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65536,
+                    "default": 65536,
+                    "description": "Maximum number of trailing output bytes"
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn session_resize_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "session_resize",
+        "Resize the shared terminal PTY.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to resize"
+                },
+                "cols": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "rows": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            },
+            "required": ["session_id", "cols", "rows"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+// === Command Execution Tools ===
+
+fn exec_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "exec",
+        "Execute a command on a separate SSH exec channel and return stdout+stderr. This command is not written to the shared terminal. For normal collaborative work, use session_send_input instead; only use exec when the user explicitly asks for isolated or background execution. It does not change the interactive shell's cwd or environment.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to execute command in"
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Command to execute"
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Command timeout in milliseconds (default: 30000)",
+                    "default": 30000
+                }
+            },
+            "required": ["session_id", "command"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn remote_rg_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "rg",
+        "Search remote files with ripgrep-style output. Uses rg on the server when available and falls back to grep. Returns matching lines with path and line numbers.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SSH connection"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Pattern to search for"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file or directory to search",
+                    "default": "."
+                },
+                "ignore_case": {
+                    "type": "boolean",
+                    "description": "Case-insensitive search",
+                    "default": false
+                },
+                "fixed_strings": {
+                    "type": "boolean",
+                    "description": "Treat pattern as a literal string",
+                    "default": false
+                },
+                "hidden": {
+                    "type": "boolean",
+                    "description": "Include hidden files when rg is available",
+                    "default": false
+                },
+                "globs": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "rg-style glob filters such as *.rs or !target/"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum output lines to return",
+                    "default": 200
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Command timeout in milliseconds",
+                    "default": 30000
+                }
+            },
+            "required": ["session_id", "pattern"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+// === SFTP Operations Tools ===
+
+fn sftp_ls_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_ls",
+        "List files and directories at a remote path.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SFTP connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote path to list",
+                    "default": "."
+                },
+                "show_hidden": {
+                    "type": "boolean",
+                    "description": "Include hidden files (starting with .)",
+                    "default": false
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_upload_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_upload",
+        "Upload a file to the remote server.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SFTP connection"
+                },
+                "local_path": {
+                    "type": "string",
+                    "description": "Local file path to upload"
+                },
+                "remote_path": {
+                    "type": "string",
+                    "description": "Remote destination path"
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "Overwrite existing file if present",
+                    "default": false
+                }
+            },
+            "required": ["session_id", "local_path", "remote_path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_upload_directory_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_upload_directory",
+        "Upload a local directory recursively. Default excludes are configurable globally and .gitignore is respected by default.",
+        sftp_directory_transfer_schema(false),
+    )
+}
+
+fn sftp_sync_directory_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_sync_directory",
+        "Synchronize a local directory to a remote directory, skipping unchanged files. Set delete_extra=true only when remote extras should be removed.",
+        sftp_directory_transfer_schema(true),
+    )
+}
+
+fn sftp_directory_transfer_schema(include_delete: bool) -> Value {
+    let mut properties = json!({
+        "session_id": {
+            "type": "string",
+            "description": "Session ID with active SFTP connection"
+        },
+        "local_path": {
+            "type": "string",
+            "description": "Local directory path to upload or sync"
+        },
+        "remote_path": {
+            "type": "string",
+            "description": "Remote destination directory"
+        },
+        "respect_gitignore": {
+            "type": "boolean",
+            "description": "Respect .gitignore files under the uploaded directory",
+            "default": true
+        },
+        "excluded_paths": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Additional exclude patterns such as node_modules/ or .venv/"
+        }
+    });
+
+    if include_delete {
+        if let Some(map) = properties.as_object_mut() {
+            map.insert(
+                "delete_extra".to_string(),
+                json!({
+                    "type": "boolean",
+                    "description": "Delete remote entries that are absent locally. Excluded paths are protected.",
+                    "default": false
+                }),
+            );
+        }
+    }
+
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": ["session_id", "local_path", "remote_path"],
+        "additionalProperties": false
+    })
+}
+
+fn sftp_download_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_download",
+        "Download a file from the remote server.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SFTP connection"
+                },
+                "remote_path": {
+                    "type": "string",
+                    "description": "Remote file path to download"
+                },
+                "local_path": {
+                    "type": "string",
+                    "description": "Local destination path"
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "Overwrite existing file if present",
+                    "default": false
+                }
+            },
+            "required": ["session_id", "remote_path", "local_path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_mkdir_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_mkdir",
+        "Create a directory on the remote server.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SFTP connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote directory path to create"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Create parent directories as needed",
+                    "default": false
+                }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_rm_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_rm",
+        "Remove a file or directory on the remote server.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SFTP connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote path to remove"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Remove directories recursively",
+                    "default": false
+                }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_mv_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_mv",
+        "Move or rename a file or directory on the remote server.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SFTP connection"
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Source path"
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Destination path"
+                }
+            },
+            "required": ["session_id", "source", "destination"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_read_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_read",
+        "Read the content of a remote text file and return it as a string. Suitable for config files, scripts, logs, etc. For binary files, use sftp_download instead.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SSH connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to read"
+                },
+                "max_bytes": {
+                    "type": "integer",
+                    "description": "Maximum bytes to read (default: 1048576 = 1MB). Prevents accidentally reading huge files.",
+                    "default": 1048576
+                }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_write_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_write",
+        "Write text content to a remote file. Creates the file if it doesn't exist, overwrites if it does. For binary files, use sftp_upload instead.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SSH connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to write"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text content to write to the file"
+                }
+            },
+            "required": ["session_id", "path", "content"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn get_content_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "get_content",
+        "Read a remote text file. Agent-friendly alias for sftp_read.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SSH connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to read"
+                },
+                "max_bytes": {
+                    "type": "integer",
+                    "description": "Maximum bytes to read before truncating",
+                    "default": 1048576
+                }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn edit_file_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "edit_file",
+        "Edit an existing remote text file. Provide content for a full-file replacement, or old_text/new_text for exact replacement.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SSH connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to edit"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full replacement content"
+                },
+                "old_text": {
+                    "type": "string",
+                    "description": "Exact text to replace"
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "Replacement text used with old_text"
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace every occurrence instead of only the first",
+                    "default": false
+                }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn add_file_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "add_file",
+        "Create a remote text file. Fails if the file already exists unless overwrite=true.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID with active SSH connection"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to create"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text content to write"
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "Replace the file if it already exists",
+                    "default": false
+                },
+                "parents": {
+                    "type": "boolean",
+                    "description": "Create parent directories if needed",
+                    "default": false
+                }
+            },
+            "required": ["session_id", "path", "content"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paired_agent_surface_is_terminal_only() {
+        let tools = get_agent_tool_definitions();
+        let names = tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(names.len(), 7);
+        for allowed in [
+            "server_list",
+            "session_create",
+            "session_send_input",
+            "session_sudo",
+            "session_read",
+            "session_resize",
+            "session_kill",
+        ] {
+            assert!(names.contains(allowed), "missing {allowed}");
+            assert!(is_agent_tool(allowed));
+        }
+        for denied in ["exec", "rg", "sftp_upload", "server_add", "server_delete"] {
+            assert!(!names.contains(denied), "unexpected {denied}");
+            assert!(!is_agent_tool(denied));
+        }
+    }
+
+    #[test]
+    fn test_get_tool_definitions() {
+        let tools = get_tool_definitions();
+
+        // The headless service only exposes SSH/session/command/SFTP operations.
+        assert_eq!(tools.len(), 29);
+        for name in ["plugin_list", "plugin_describe", "plugin_execute"] {
+            assert!(!tools.iter().any(|tool| tool.name == name));
+        }
+
+        // Check that all tools have non-empty names and descriptions
+        for tool in &tools {
+            assert!(!tool.name.is_empty(), "Tool name should not be empty");
+            assert!(
+                !tool.description.is_empty(),
+                "Tool description should not be empty"
+            );
+        }
+
+        // Verify specific tools exist
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(tool_names.contains(&"server_list"));
+        assert!(tool_names.contains(&"session_create"));
+        assert!(tool_names.contains(&"session_send_input"));
+        assert!(tool_names.contains(&"session_read"));
+        assert!(tool_names.contains(&"session_resize"));
+        assert!(tool_names.contains(&"exec"));
+        assert!(tool_names.contains(&"rg"));
+        assert!(tool_names.contains(&"sftp_ls"));
+        assert!(tool_names.contains(&"get_content"));
+        assert!(tool_names.contains(&"edit_file"));
+        assert!(tool_names.contains(&"add_file"));
+    }
+
+    #[test]
+    fn test_tool_definition_serialization() {
+        let tool = server_list_tool();
+        let json = serde_json::to_string(&tool).expect("Should serialize");
+        assert!(json.contains("server_list"));
+        assert!(json.contains("inputSchema"));
+    }
+
+    #[test]
+    fn collaborative_command_guidance_prefers_shared_terminal() {
+        let shared = session_send_input_tool();
+        let isolated = exec_tool();
+
+        assert!(shared
+            .description
+            .contains("Prefer this for collaborative work"));
+        assert!(isolated
+            .description
+            .contains("only use exec when the user explicitly asks for isolated"));
+        assert!(isolated
+            .description
+            .contains("not written to the shared terminal"));
+    }
+
+    #[test]
+    fn compact_definitions_drop_repeated_schema_prose() {
+        let tools = get_compact_tool_definitions();
+        assert_eq!(tools.len(), 29);
+        let encoded = serde_json::to_string(&tools).unwrap();
+        assert!(!encoded.contains("Filter servers by group ID"));
+        assert!(!encoded.contains("\"default\""));
+        assert!(encoded.contains("session_send_input"));
+    }
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for zxySSH",
+  "platforms": [
+    "linux",
+    "macOS",
+    "windows"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*"
+    ]
+  },
+  "windows": [
+    "main",
+    "detach-*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "updater:default",
+    "process:default",
+    "shell:default",
+    "shell:allow-open",
+    "core:window:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-inner-size",
+    "core:window:allow-set-title",
+    "core:window:allow-cursor-position",
+    "core:window:allow-set-position",
+    "core:webview:allow-get-all-webviews",
+    "core:window:allow-get-all-windows",
+    "core:event:allow-emit-to",
+    "core:window:allow-inner-position",
+    "core:window:allow-scale-factor",
+    "core:window:allow-set-size",
+    "core:window:allow-available-monitors",
+    "core:window:allow-destroy",
+    "core:window:allow-unminimize"
+  ],
+  "webviews": [
+    "main",
+    "detach-*"
+  ]
+}
