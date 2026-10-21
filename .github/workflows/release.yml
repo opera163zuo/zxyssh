@@ -215,3 +215,5 @@ jobs:
             gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
             echo "Built and uploaded $TAG as a draft. Nothing was published or marked latest." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+# Registered by GitHub after a push touches this path.
