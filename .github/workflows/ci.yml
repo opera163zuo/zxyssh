@@ -130,3 +130,5 @@ jobs:
       - run: node scripts/report-ci-status.mjs finish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Workflows are registered by GitHub on a push that touches this directory.

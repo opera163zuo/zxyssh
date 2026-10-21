@@ -27,3 +27,5 @@ jobs:
             } else {
               core.info(promotion ? 'Validated dev → main release promotion.' : 'Validated dev integration PR.');
             }
+
+# Registered by GitHub after a push touches this path.
