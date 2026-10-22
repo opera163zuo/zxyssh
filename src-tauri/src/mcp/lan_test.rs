@@ -649,6 +649,21 @@ async fn keyless_pairing_is_refused_while_approval_is_on() {
     let text = response.text().await.expect("body");
     assert!(text.contains("clientPublicKey"), "got {text}");
 
+    // A malformed key is refused the same way: it must not burn the code, or the
+    // operator would be approving a request that cannot be delivered.
+    let malformed = reqwest::Client::new()
+        .post(format!("{}/pair", service.base_url))
+        .json(&json!({
+            "name": "hermes-legacy",
+            "code": code,
+            "clientPublicKey": "c2hvcnQ=",
+        }))
+        .send()
+        .await
+        .expect("malformed key request");
+    assert_eq!(malformed.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert!(malformed.text().await.expect("body").contains("32-byte"));
+
     // The refusal happened before the code was spent, so the same code still
     // opens a request once the client can read a sealed delivery.
     let (status, request_id, _) = service.pair_sealed("hermes-legacy", &code).await;
