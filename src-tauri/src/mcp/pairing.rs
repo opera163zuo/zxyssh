@@ -10,6 +10,10 @@ pub enum PairingError {
     /// The approval queue delivers credentials sealed, so a client that cannot
     /// present a key would receive a credential it cannot read.
     ClientKeyRequired,
+    /// A presented key is not a usable X25519 public key. Checked before the
+    /// pairing code is spent, so a malformed body cannot burn a code and leave
+    /// the operator approving a request that then fails.
+    InvalidClientKey,
     /// The registry could not be written. The in-memory change is rolled back.
     Storage(String),
     /// The persisted registry could not be read or decrypted. Callers must
@@ -190,6 +194,14 @@ pub struct PairPoll {
     pub sealed_credential: Option<String>,
 }
 
+/// A pairing key must decode from base64url to exactly one X25519 public key.
+fn valid_client_key(public_key: &str) -> bool {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(public_key)
+        .is_ok_and(|bytes| bytes.len() == 32)
+}
+
 /// Pairing state for LAN MCP Agents: one expiring one-time code plus the set of
 /// paired Agents. Only token hashes are retained, and the whole registry is
 /// encrypted at rest with the device key.
@@ -349,6 +361,11 @@ impl PairingRegistry {
         now: i64,
     ) -> Result<PairStarted, PairingError> {
         let name = valid_name(name)?;
+        if let Some(public_key) = client_public_key {
+            if !valid_client_key(public_key) {
+                return Err(PairingError::InvalidClientKey);
+            }
+        }
         if client_public_key.is_none() {
             // A keyless client cannot read a sealed delivery, so the approval
             // queue refuses it before spending the code; one-step mode still
@@ -766,6 +783,24 @@ mod tests {
             registry.pair("good-agent", &code, NOW).unwrap_err(),
             PairingError::InvalidCode
         );
+    }
+
+    #[test]
+    fn a_malformed_client_key_is_refused_without_spending_the_code() {
+        let mut registry = PairingRegistry::new();
+        let code = registry.create_code(NOW).unwrap();
+        for bogus in ["not-base64!!", "", "c2hvcnQ="] {
+            assert_eq!(
+                registry
+                    .begin_pairing("hermes", &code, Some(bogus), "peer", NOW)
+                    .unwrap_err(),
+                PairingError::InvalidClientKey
+            );
+        }
+        // Nothing was spent: the same code still opens a request with a real key.
+        assert!(registry
+            .begin_pairing("hermes", &code, Some(&client_key()), "peer", NOW)
+            .is_ok());
     }
 
     #[test]

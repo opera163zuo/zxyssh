@@ -171,6 +171,9 @@ fn registry_error(error: PairingError) -> String {
         PairingError::Storage(detail) => format!("Agent registry could not be saved: {detail}"),
         PairingError::InvalidCode => "Pairing code rejected".to_string(),
         PairingError::InvalidName => "Agent name must be 1-80 characters".to_string(),
+        PairingError::InvalidClientKey => {
+            "clientPublicKey must be a base64url-encoded 32-byte X25519 key".to_string()
+        }
         PairingError::ClientKeyRequired => {
             "Approval mode delivers credentials sealed, so a pairing request must include              clientPublicKey"
                 .to_string()

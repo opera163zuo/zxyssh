@@ -197,6 +197,10 @@ pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Res
                 .into_response(),
         ),
         Err(PairingError::InvalidName) => reject(StatusCode::BAD_REQUEST, "Agent name is required"),
+        Err(PairingError::InvalidClientKey) => reject(
+            StatusCode::BAD_REQUEST,
+            "clientPublicKey must be a base64url-encoded 32-byte X25519 key",
+        ),
         Err(PairingError::ClientKeyRequired) => reject(
             StatusCode::BAD_REQUEST,
             "This service approves pairing before issuing credentials, so a pairing request \
