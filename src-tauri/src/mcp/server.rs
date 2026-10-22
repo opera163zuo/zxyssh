@@ -36,7 +36,9 @@ use crate::storage::Database;
 use super::approval::{AgentApprovalManager, ApprovalOutcome, ApprovalRequest};
 use super::guard::{self, GuardConfig, GUARD_CONFIG_KEY};
 use super::pairing::{AuthenticatedAgent, PairingRegistry};
-use super::pairing_http::{audit_label, handle_pair, require_paired_agent, PairRateLimiter};
+use super::pairing_http::{
+    audit_label, handle_pair, handle_pair_status, require_paired_agent, PairRateLimiter,
+};
 use super::tools::{
     get_compact_agent_tool_definitions, get_compact_tool_definitions, is_agent_tool,
 };
@@ -63,6 +65,7 @@ pub struct McpState {
     agent_input_tracker: Arc<guard::SharedAgentInputTracker>,
     pub(super) pairing_registry: Option<Arc<std::sync::Mutex<PairingRegistry>>>,
     pub(super) pairing_limiter: Arc<std::sync::Mutex<PairRateLimiter>>,
+    pub(super) pairing_poll_limiter: Arc<std::sync::Mutex<PairRateLimiter>>,
     agent_sessions: Arc<Mutex<HashMap<String, HashSet<String>>>>,
 }
 
@@ -78,6 +81,9 @@ impl McpState {
             agent_input_tracker,
             pairing_registry: None,
             pairing_limiter: Arc::new(std::sync::Mutex::new(PairRateLimiter::default())),
+            pairing_poll_limiter: Arc::new(std::sync::Mutex::new(PairRateLimiter::with_quota(
+                super::pairing_http::MAX_POLL_REQUESTS_PER_PEER,
+            ))),
             agent_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -331,6 +337,7 @@ impl McpServer {
         Router::new()
             .route("/health", get(handle_health))
             .route("/pair", post(handle_pair))
+            .route("/pair/status", post(handle_pair_status))
             .route("/", post(handle_jsonrpc))
             .route("/mcp", post(handle_jsonrpc))
             .with_state(state.clone())

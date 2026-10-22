@@ -1,6 +1,6 @@
 ---
 name: zxyssh
-description: Use the zxySSH SSH service through its MCP endpoint for site listing, persistent terminal sessions, and server-managed sudo; pair an Agent with a one-time code and administer the service with the native CLI.
+description: Use the zxySSH SSH service through its MCP endpoint for site listing, persistent terminal sessions, and server-managed sudo; pair an Agent with a one-time code that an operator must approve, and administer the service with the native CLI.
 ---
 
 # zxySSH
@@ -11,21 +11,39 @@ The service runs on a Linux host and owns the SSH connections. Credentials, priv
 
 Resolve the native executable in this order: `zxyssh` from `PATH`, then `$HOME/.local/bin/zxyssh`. The executable administers the service; it no longer opens SSH sessions itself. If neither path exists, tell the user which lookup failed instead of substituting another client, because that bypasses the saved site configuration and the session model.
 
-## Pair an Agent once
+## Pair an Agent
 
-An operator mints a single-use six-digit code on the host, then the Agent exchanges it for a bearer token:
+An operator mints a single-use six-digit code, either in the desktop app (Settings → **Agent access and pairing**) or on the host:
 
 ```bash
 zxyssh mcp pair-code
 ```
 
+Pairing then waits for a human. Exchanging the code creates a request, and no credential exists until an operator approves it:
+
 ```text
-POST /pair {"name":"<agent name>","code":"<six digits>"}  ->  {"token":"vsh_..."}
+POST /pair {"name":"<agent name>","code":"<six digits>","clientPublicKey":"<base64url X25519>"}
+     -> 202 {"requestId":"...","status":"awaiting_approval","pollPath":"/pair/status"}
+POST /pair/status {"requestId":"..."}
+     -> 200 {"status":"awaiting_approval"}
+     -> 200 {"status":"delivered","agentId":"...","name":"...","serverPublicKey":"...","sealedToken":"...","tokenType":"Bearer-sealed"}
 ```
 
-The code expires after 300 seconds and a wrong code fails the pair limit. Keep the token out of prompts, logs, and files. `zxyssh mcp agents` lists paired Agents; `revoke`, `rename`, and `rotate` change credentials, and a revoked or rotated token stops working on the next request.
+Approve or refuse from either side, on the same registry:
 
-The listener defaults to `127.0.0.1:8765`. Reaching it over a LAN requires `ZXYSSH_MCP_BIND=<address>:<port>` with `ZXYSSH_MCP_ALLOW_LAN=true`, a concrete address, and at least one already-paired Agent. This transport is plain HTTP for a trusted internal network; treat the token as the only secret.
+```bash
+zxyssh mcp requests list
+zxyssh mcp requests approve <requestId|prefix>
+zxyssh mcp requests reject <requestId|prefix>
+zxyssh mcp approvals            # show the mode
+zxyssh mcp approvals --set off  # issue credentials immediately again
+```
+
+With the approval queue on, `clientPublicKey` is required: a keyless client could not read a sealed delivery, so `POST /pair` answers `400` and leaves the code unspent. Turn the queue off (`zxyssh mcp approvals --set off`) to restore the one-step shape `POST /pair {"name","code"}` -> `200 {"token":...}`, which returns the credential in the clear. With a key, the credential is sealed through an ephemeral X25519 agreement so a listener on the segment cannot read it, and it is delivered once. `zxyssh mcp pair --endpoint <url> --name <name>` is the reference client: it reads the code from stdin, waits for approval, and prints the credential once.
+
+The code expires after 300 seconds, five wrong guesses spend it, and an unanswered request expires after 900 seconds. Keep tokens out of prompts, logs, and files. `zxyssh mcp agents` lists paired Agents; `revoke`, `rename`, and `rotate` change credentials, and a revoked or rotated token stops working on the next request.
+
+The listener defaults to `127.0.0.1:8765`. Reaching it over a LAN requires `ZXYSSH_MCP_BIND=<address>:<port>` with `ZXYSSH_MCP_ALLOW_LAN=true`, a concrete address, and at least one already-paired Agent; the service publishes what it bound to in `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json`, which the desktop shows. This transport is plain HTTP for a trusted internal network: approval and sealing protect the credential, while the pairing code itself still crosses the wire in the clear.
 
 ## Use the MCP tools
 

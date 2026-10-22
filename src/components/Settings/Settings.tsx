@@ -26,6 +26,7 @@ import {
 } from '../../stores/cloudSyncStore';
 import { IntegrationCard } from './IntegrationCard';
 import { CustomThemeEditor } from './CustomThemeEditor';
+import { AgentPairingPanel } from '../AgentPairingPanel';
 import {
   Monitor,
   Palette,
@@ -1376,6 +1377,7 @@ export function Settings() {
       {runtimeCapabilities.agentGateway && (
         <>
         <AgentGuardSection />
+        <AgentPairingPanel />
         <SettingsSection
         icon={<Bot className="w-5 h-5" />}
         title={t('settings.gateway')}

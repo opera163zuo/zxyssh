@@ -119,12 +119,15 @@ The `zxyssh` binary is the service and its administration surface. It runs the l
 ```bash
 zxyssh mcp serve                        # run the listener (systemd Type=simple)
 zxyssh mcp pair-code                    # one-time code for the next Agent
+zxyssh mcp requests list                # pairing requests waiting for approval
+zxyssh mcp requests approve <request-id>
+zxyssh mcp approvals                    # whether pairing waits for approval
 zxyssh mcp agents                       # paired Agents and revocation state
 zxyssh mcp credential set my-server     # read the secret from piped stdin
 zxyssh mcp hostkey probe my-server      # headless TOFU before a connection
 ```
 
-A LAN listener needs a concrete bind address and an explicit opt-in, and refuses to start while no Agent is paired. Never put passwords or private keys in command-line arguments or Agent prompts.
+A correct pairing code only opens a request: the credential is issued after an operator approves it in the desktop or with `zxyssh mcp requests approve`, and it comes back sealed to the Agent's ephemeral key, so a pairing request must present `clientPublicKey` while the queue is on. A LAN listener needs a concrete bind address and an explicit opt-in, and refuses to start while no Agent is paired. Never put passwords or private keys in command-line arguments or Agent prompts.
 
 The desktop and the service share one database when they run as the same user, so sites added in the UI are the sites an Agent can use. The process owning a connection must remain alive: service-owned sessions can outlive the GUI, while GUI-owned ones end when that GUI exits. Upgrade the desktop and CLI together, and save ongoing work before restarting.
 
