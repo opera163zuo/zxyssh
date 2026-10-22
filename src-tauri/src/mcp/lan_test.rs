@@ -27,12 +27,25 @@ struct TestService {
 
 impl TestService {
     async fn start() -> Self {
+        // The transport tests below care about auth and tool routing, so they pair
+        // the way 2.0 did: a code that issues a credential immediately.
+        let service = Self::start_with_approval(false).await;
+        service
+    }
+
+    async fn start_requiring_approval() -> Self {
+        Self::start_with_approval(true).await
+    }
+
+    async fn start_with_approval(require_approval: bool) -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
         let database =
             Arc::new(Database::new_at(temp.path().join("lan-mcp.db")).expect("test database"));
-        let registry = Arc::new(std::sync::Mutex::new(
-            PairingRegistry::load(database.clone()).expect("empty registry"),
-        ));
+        let mut initial = PairingRegistry::load(database.clone()).expect("empty registry");
+        initial
+            .set_pairing_approval_required(require_approval)
+            .expect("set approval mode");
+        let registry = Arc::new(std::sync::Mutex::new(initial));
         let session_manager = Arc::new(SessionManager::new(database.clone()));
         let app: Router = McpServer::new(database.clone(), session_manager)
             .with_pairing_registry(registry.clone())
@@ -84,6 +97,98 @@ impl TestService {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let body: Value = response.json().await.expect("pair body");
         body["token"].as_str().expect("issued token").to_string()
+    }
+
+    /// Pair as a client that can read a sealed delivery, returning the request id
+    /// together with the ephemeral key the credential is sealed to.
+    async fn pair_sealed(
+        &self,
+        name: &str,
+        code: &str,
+    ) -> (
+        reqwest::StatusCode,
+        String,
+        ring::agreement::EphemeralPrivateKey,
+    ) {
+        use crate::mcp::pair_crypto;
+        let key_pair = pair_crypto::ephemeral_private_key().expect("client key");
+        let response = reqwest::Client::new()
+            .post(format!("{}/pair", self.base_url))
+            .json(&json!({
+                "name": name,
+                "code": code,
+                "clientPublicKey": pair_crypto::public_key_b64(&key_pair).expect("public key"),
+            }))
+            .send()
+            .await
+            .expect("sealed pair request");
+        let status = response.status();
+        let body: Value = response.json().await.expect("sealed pair body");
+        let request_id = body["requestId"].as_str().unwrap_or_default().to_string();
+        (status, request_id, key_pair)
+    }
+
+    async fn poll(&self, request_id: &str) -> (reqwest::StatusCode, Value) {
+        let response = reqwest::Client::new()
+            .post(format!("{}/pair/status", self.base_url))
+            .json(&json!({ "requestId": request_id }))
+            .send()
+            .await
+            .expect("poll request");
+        let status = response.status();
+        let body: Value = match response.json().await {
+            Ok(body) => body,
+            Err(_) => Value::Null,
+        };
+        (status, body)
+    }
+
+    async fn poll_text(&self, request_id: &str) -> String {
+        reqwest::Client::new()
+            .post(format!("{}/pair/status", self.base_url))
+            .json(&json!({ "requestId": request_id }))
+            .send()
+            .await
+            .expect("poll request")
+            .text()
+            .await
+            .expect("poll body")
+    }
+
+    async fn active_agent_count(&self) -> usize {
+        self.registry.lock().unwrap().active_agent_count()
+    }
+
+    /// Mint a code through a registry loaded from storage, which is what
+    /// `zxyssh mcp pair-code` and the desktop command both do. Using the service's
+    /// own instance would skip the reload that keeps the two views consistent.
+    fn mint_code_standalone(&self) -> String {
+        let mut standalone =
+            crate::mcp::pairing::PairingRegistry::load(self.database.clone()).expect("registry");
+        standalone
+            .create_code(chrono::Utc::now().timestamp())
+            .expect("pairing code")
+    }
+
+    /// Approve the first awaiting request the way the desktop UI does, through a
+    /// registry instance loaded from storage rather than the service's own.
+    async fn approve_first_request(&self) -> String {
+        let database = self.database.clone();
+        let mut standalone =
+            crate::mcp::pairing::PairingRegistry::load(database).expect("registry");
+        let now = chrono::Utc::now().timestamp();
+        let pending = standalone
+            .list_requests(now)
+            .into_iter()
+            .find(|request| {
+                request.status == crate::mcp::pairing::PairRequestStatus::AwaitingApproval
+            })
+            .expect("awaiting request");
+        assert!(standalone
+            .approve_request(&pending.id, now)
+            .unwrap()
+            .is_some());
+        pending.id
     }
 
     async fn rpc(&self, token: Option<&str>, payload: Value) -> reqwest::Response {
@@ -379,5 +484,175 @@ async fn malformed_pairing_bodies_are_rejected_without_touching_the_code() {
     // The untouched code still pairs.
     let accepted = service.pair("hermes", &code).await;
     assert_eq!(accepted.status(), reqwest::StatusCode::OK);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn pairing_waits_for_an_operator_before_any_credential_exists() {
+    let service = TestService::start_requiring_approval().await;
+    let code = service.mint_code();
+
+    let (status, request_id, key_pair) = service.pair_sealed("hermes-await", &code).await;
+    assert_eq!(status, reqwest::StatusCode::ACCEPTED);
+    assert!(!request_id.is_empty());
+
+    let (status, poll_body) = service.poll(&request_id).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(poll_body["status"], "awaiting_approval");
+    assert_eq!(service.active_agent_count().await, 0);
+
+    let approved = service.approve_first_request().await;
+    assert_eq!(approved, request_id);
+    let (_, delivered) = service.poll(&request_id).await;
+    assert_eq!(delivered["status"], "delivered");
+    let token = crate::mcp::pair_crypto::open_sealed(
+        key_pair,
+        delivered["serverPublicKey"]
+            .as_str()
+            .expect("serverPublicKey"),
+        &request_id,
+        delivered["sealedToken"].as_str().expect("sealedToken"),
+    )
+    .expect("open the sealed credential");
+    assert!(token.starts_with("vsh_"));
+
+    let response = service
+        .rpc(
+            Some(&token),
+            json!({"jsonrpc":"2.0","id":1,"method":"ping","params":{}}),
+        )
+        .await;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn an_approved_credential_is_delivered_exactly_once() {
+    let service = TestService::start_requiring_approval().await;
+    let (_, request_id, _) = service
+        .pair_sealed("hermes-once", &service.mint_code())
+        .await;
+    service.approve_first_request().await;
+    let (_, first) = service.poll(&request_id).await;
+    assert!(first["sealedToken"].as_str().is_some());
+    let (_, second) = service.poll(&request_id).await;
+    assert_eq!(second["status"], "delivered");
+    assert!(
+        second.get("sealedToken").is_none(),
+        "the credential must not be handed out twice"
+    );
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn rejected_pairing_never_yields_a_credential() {
+    let service = TestService::start_requiring_approval().await;
+    let (_, request_id, _) = service
+        .pair_sealed("hermes-deny", &service.mint_code())
+        .await;
+    assert!(service
+        .registry
+        .lock()
+        .unwrap()
+        .reject_request(&request_id)
+        .unwrap());
+    let (_, body) = service.poll(&request_id).await;
+    assert_eq!(body["status"], "rejected");
+    assert!(body.get("sealedToken").is_none());
+    assert_eq!(service.active_agent_count().await, 0);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn sealed_delivery_returns_the_credential_only_to_the_key_holder() {
+    use crate::mcp::pair_crypto::{self, public_key_b64};
+
+    let service = TestService::start_requiring_approval().await;
+    let key_pair = pair_crypto::ephemeral_private_key().expect("client key");
+    let client_public = public_key_b64(&key_pair).expect("client public key");
+    let response = reqwest::Client::new()
+        .post(format!("{}/pair", service.base_url))
+        .json(&json!({
+            "name": "hermes-sealed",
+            "code": service.mint_code(),
+            "clientPublicKey": client_public,
+        }))
+        .send()
+        .await
+        .expect("sealed pair request");
+    assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+    let body: Value = response.json().await.expect("body");
+    let request_id = body["requestId"].as_str().expect("requestId").to_string();
+
+    service.approve_first_request().await;
+    let text = service.poll_text(&request_id).await;
+    assert!(
+        !text.contains("vsh_"),
+        "the credential must not appear in the clear"
+    );
+    let delivered: Value = serde_json::from_str(&text).expect("poll body");
+    assert_eq!(delivered["status"], "delivered");
+    let token = pair_crypto::open_sealed(
+        key_pair,
+        delivered["serverPublicKey"]
+            .as_str()
+            .expect("serverPublicKey"),
+        &request_id,
+        delivered["sealedToken"].as_str().expect("sealedToken"),
+    )
+    .expect("open sealed credential");
+    assert!(token.starts_with("vsh_"));
+
+    let response = service
+        .rpc(
+            Some(&token),
+            json!({"jsonrpc":"2.0","id":2,"method":"ping","params":{}}),
+        )
+        .await;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn an_unknown_pairing_request_id_is_not_found() {
+    let service = TestService::start_requiring_approval().await;
+    let (status, _) = service.poll("00000000-0000-0000-0000-000000000000").await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn approval_mode_is_shared_with_the_service_process_view() {
+    let service = TestService::start_requiring_approval().await;
+    // Flipping the switch is what `zxyssh mcp approvals off` and the desktop
+    // toggle both do: write from another registry instance, and the running
+    // service must honour it on the next pairing.
+    let mut standalone =
+        crate::mcp::pairing::PairingRegistry::load(service.database.clone()).expect("registry");
+    standalone
+        .set_pairing_approval_required(false)
+        .expect("disable approval");
+    let response = service
+        .pair("hermes-relaxed", &service.mint_code_standalone())
+        .await;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = response.json().await.expect("body");
+    assert!(body["token"].as_str().expect("token").starts_with("vsh_"));
+    service.shutdown();
+}
+#[tokio::test]
+async fn keyless_pairing_is_refused_while_approval_is_on() {
+    let service = TestService::start_requiring_approval().await;
+    let code = service.mint_code();
+    let response = service.pair("hermes-legacy", &code).await;
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let text = response.text().await.expect("body");
+    assert!(text.contains("clientPublicKey"), "got {text}");
+
+    // The refusal happened before the code was spent, so the same code still
+    // opens a request once the client can read a sealed delivery.
+    let (status, request_id, _) = service.pair_sealed("hermes-legacy", &code).await;
+    assert_eq!(status, reqwest::StatusCode::ACCEPTED);
+    assert!(!request_id.is_empty());
     service.shutdown();
 }

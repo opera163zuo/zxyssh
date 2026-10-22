@@ -22,10 +22,16 @@ Pair and administer Agents with:
 
 ```bash
 zxyssh mcp pair-code
+zxyssh mcp requests list
+zxyssh mcp requests approve <request-id>
+zxyssh mcp requests reject <request-id>
+zxyssh mcp approvals [--set on|off]
 zxyssh mcp agents
 zxyssh mcp revoke <agent-id>
 zxyssh mcp rotate <agent-id>
 ```
+
+A pairing code only opens a request: the credential exists after an operator approves it, here or in the desktop's Settings → Agent access and pairing, and it is delivered sealed to the Agent's ephemeral key, which is why a request must carry `clientPublicKey` while approvals are on. `zxyssh mcp pair --endpoint <url> --name <name>` pairs one machine from this CLI, reading the code from stdin.
 
 SSH passwords and private keys are saved through the desktop UI or provisioned by piping them to `zxyssh mcp credential set`. They are encrypted at rest and consumed by the Rust service; the MCP protocol never returns them. Sudo credentials and exact command allowlists are configured per site in the UI.
 

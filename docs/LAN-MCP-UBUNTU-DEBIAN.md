@@ -57,6 +57,7 @@ curl -s http://127.0.0.1:8765/health
 
 ~/.local/bin/zxyssh mcp pair-code
 # One-time pairing code is printed locally; valid for five minutes and one use.
+# The same code can also be minted in the desktop app: Settings -> "Agent access and pairing".
 ```
 
 To keep the user service running after logout, enable lingering for this account:
@@ -65,9 +66,43 @@ To keep the user service running after logout, enable lingering for this account
 sudo loginctl enable-linger "$USER"
 ```
 
-The Agent exchanges the code for its own bearer token. The token is returned once; only its hash is stored. Pair from the trusted private network; this service uses HTTP, so do not send bearer tokens across an untrusted network.
+A correct code does not buy a credential any more. It opens a **pairing request**, which waits until an operator decides, so an unattended machine cannot enroll itself:
 
-Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health` and `/pair` are unauthenticated.
+```text
+POST /pair          {"name":"hermes","code":"481516","clientPublicKey":"<base64url X25519>"}
+     -> 202 {"requestId":"…","status":"awaiting_approval","pollPath":"/pair/status"}
+POST /pair/status   {"requestId":"…"}
+     -> 200 {"status":"awaiting_approval"}            # still waiting
+     -> 200 {"status":"delivered","agentId":"…","serverPublicKey":"…","sealedToken":"…"}
+```
+
+Decide from the desktop panel, which lists the requested name and the source address, or from the terminal:
+
+```bash
+~/.local/bin/zxyssh mcp requests list
+~/.local/bin/zxyssh mcp requests approve <request-id>
+~/.local/bin/zxyssh mcp requests reject <request-id>
+```
+
+An approved credential is handed out exactly once, and only sealed to the
+requesting Agent's ephemeral key: the service performs an X25519 agreement with
+the `clientPublicKey` and derives an AES-256-GCM key scoped to that request id,
+so a listener on the segment cannot recover the token. A request that was never
+answered expires after 900 seconds and the code is already spent, so a new code
+is needed. While the queue is on, a pairing body without `clientPublicKey` is
+refused with `400` and the code stays unspent, because the client could not read
+a sealed delivery. `zxyssh mcp approvals --set off` restores the 2.0 behaviour of
+issuing a cleartext credential immediately.
+
+On the machine that wants to become an Agent, the same protocol is available as a
+command; it reads the code from stdin, waits for the approval and prints the
+credential once:
+
+```bash
+~/.local/bin/zxyssh mcp pair --endpoint http://192.168.0.96:8765 --name hermes-laptop
+```
+
+Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/pair` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display.
 
 ```bash
 ~/.local/bin/zxyssh mcp agents

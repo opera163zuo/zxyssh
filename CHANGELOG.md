@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.0 — 2026-10-22
+
+### Pairing became an access decision, not a handoff
+
+A correct six-digit pairing code no longer buys a credential. It opens a **pairing request** carrying the requested Agent name and the source address, and nothing is issued until an operator decides. The desktop app now manages that queue in Settings → **Agent access and pairing**: mint a code with its countdown, approve or refuse each request, rename, rotate and revoke paired Agents, and see what the LAN listener actually bound to. The same registry is driven from a headless host with `zxyssh mcp requests list|approve|reject` and `zxyssh mcp approvals [--set on|off]`, because both views read and write the one encrypted registry in the shared database.
+
+Approved credentials are sealed rather than displayed. The Agent may send an ephemeral `clientPublicKey`; the service then performs an X25519 agreement, derives an AES-256-GCM key scoped to that request id, and returns the sealed token only through `POST /pair/status` — once, after which the request keeps no credential material. A listener on the same network segment can no longer recover a bearer token from a pairing exchange. While the queue is on, a pairing request without `clientPublicKey` is refused with `400` and the code stays unspent; `zxyssh mcp approvals --set off` restores the one-step cleartext exchange.
+
+`zxyssh mcp pair --endpoint <url> --name <name>` is the reference client: it reads the code from stdin so it stays out of arguments and shell history, waits for the approval, and prints the credential once. Requests go unanswered after 900 seconds, the spent code cannot open a second request, and a registry written by 2.0.1 is read as *requiring approval* rather than silently keeping one-step pairing.
+
+### Compatibility notes
+
+Pairing is two-step by default for new and existing installations. An operator who wants 2.0 behaviour runs `zxyssh mcp approvals --set off` or unticks the setting; that is also the only mode in which a client sending no `clientPublicKey` can pair in one request. `POST /pair` answers `202` with a `requestId` instead of a token while approval is pending, so any script that parsed a token straight out of the pairing response must poll `/pair/status`. `/health`, `/pair` and `/pair/status` remain unauthenticated; every MCP route still requires a bearer token. The pairing code itself still travels in the clear over this plain-HTTP transport — approval and sealing protect the credential, not the code.
+
+
 ## 2.0.1 — 2026-10-22
 
 ### zxySSH, with an Agent-facing MCP service at the centre

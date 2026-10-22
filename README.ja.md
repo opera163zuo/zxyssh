@@ -119,12 +119,15 @@ zxySSH サービスは Ubuntu/Debian Linux サーバーを対象とします。M
 ```bash
 zxyssh mcp serve                        # リッスン起動（systemd Type=simple）
 zxyssh mcp pair-code                    # 次の Agent 用の使い捨てコード
+zxyssh mcp requests list                # 承認待ちのペアリング要求
+zxyssh mcp requests approve <request-id>
+zxyssh mcp approvals                    # 承認制の有効／無効
 zxyssh mcp agents                       # ペアリング済み Agent と失効状態
 zxyssh mcp credential set my-server     # 秘密情報は標準入力から受け取る
 zxyssh mcp hostkey probe my-server      # 接続前の非対話 TOFU
 ```
 
-LAN で待ち受けるには具体的なバインドアドレスと `ZXYSSH_MCP_ALLOW_LAN=true` の明示指定が必要で、ペアリング済み Agent が 1 体もいない場合は起動しません。パスワードや秘密鍵を引数や Agent への依頼文に入れないでください。
+正しいペアリングコードは要求を生成するだけです：認証情報はオペレーターがデスクトップ版または `zxyssh mcp requests approve` で承認してから発行され、Agent の一時鍵に封をして渡されます。承認队列が有効な間、要求は `clientPublicKey` を必須とします。LAN で待ち受けるには具体的なバインドアドレスと `ZXYSSH_MCP_ALLOW_LAN=true` の明示指定が必要で、ペアリング済み Agent が 1 体もいない場合は起動しません。パスワードや秘密鍵を引数や Agent への依頼文に入れないでください。
 
 デスクトップとサービスが同じ Linux ユーザーで動けばデータベースを共有するため、UI で追加したサイトが Agent の使えるサイトになります。接続の所有プロセスは生きている必要があります。サービスが所有する接続は GUI 終了後も継続できますが、GUI 所有の接続はその終了で切れます。デスクトップと CLI は一緒に更新し、再起動前に作業を保存してください。
 
