@@ -161,7 +161,7 @@ mod tests {
         let service = ephemeral_private_key().unwrap();
         let envelope =
             seal_for_agent(service, &client_public, "req-1", "vsh_secret-token").unwrap();
-        assert_eq!(envelope.public_key.len() > 40, true);
+        assert_eq!(envelope.public_key.len(), 43);
         let opened = open_sealed(client, &envelope.public_key, "req-1", &envelope.sealed).unwrap();
         assert_eq!(opened, "vsh_secret-token");
     }
