@@ -55,7 +55,7 @@ SessionManager.create_with_credentials()
 - SSH host-key verification is **TOFU, enforced server-side** in the connect flow: `probe_host_key` → user approval → connect; a changed host key hard-fails before authentication
 - Terminal output events are **base64-encoded and coalesced** — the frontend must base64-decode event payloads before writing to xterm
 - The service↔GUI IPC directory is per-user **0700**, with a private socket. GUI startup owns the service when available or attaches to an existing one. Route each operation to its session's owner.
-- MCP transport is plain HTTP bearer tokens, accepted for a trusted internal network by explicit operator opt-in. Pairing is a single-use six-digit code (300 s TTL, five-attempt limit), tokens are stored as SHA-256 hashes, and revocation/rotation take effect on the next request. A LAN listener refuses wildcard addresses and will not start with zero paired Agents.
+- MCP transport is plain HTTP bearer tokens, accepted for a trusted internal network by explicit operator opt-in. Pairing is a single-use six-digit code (300 s TTL, five-attempt limit) that **opens a request rather than a credential**: nothing is issued until an operator approves it in Settings -> Agent access and pairing, or with `zxyssh mcp requests approve`. Approved credentials are sealed with an X25519 agreement against the Agent's `clientPublicKey` (`src-tauri/src/mcp/pair_crypto.rs`), delivered once through `POST /pair/status`, and stored only as SHA-256 hashes; revocation/rotation take effect on the next request. While the queue is on a pairing request must carry `clientPublicKey`, so no cleartext credential is ever stored or sent; the queue can be switched off for one-step pairing. The pairing code still travels in the clear while the listener is HTTP, so approval and sealing protect the credential, not the code. A LAN listener refuses wildcard addresses and will not start with zero paired Agents; it publishes `mcp-lan-status.json` (0600, no secrets) for the desktop to display. `zxyssh mcp approvals --set off` restores one-step pairing.
 - Paired Agents are limited by a tool allowlist plus session ownership, not only by prompt policy. `is_agent_tool`/`get_agent_tool_definitions` in `src-tauri/src/mcp/tools.rs` and the paired-Agent branch in `handle_tools_call` must stay in sync; `session_kill` rejects the batch form because ownership of one session must not grant authority over all of them.
 - Sudo is injected by the service only when the site has both a stored sudo credential and an exact command in `sudo_policies`; anything else fails closed.
 - Tests must use injected temporary databases/keys. Never call production data initializers in test helpers or run all ignored tests against user configuration.
@@ -88,7 +88,7 @@ src-tauri/                    # Rust backend
   │   ├── storage/            # Database + models + credential/sudo crypto (crypto.rs)
   │   ├── local_shell/        # Local terminal (portable-pty)
   │   ├── ipc/                # Service↔GUI IPC socket (per-user 0700)
-  │   ├── mcp/                # MCP service: HTTP JSON-RPC, pairing, Agent tool surface
+  │   ├── mcp/                # MCP service: HTTP JSON-RPC, pairing approval queue, sealed credential delivery, Agent tool surface
   │   ├── install/            # AI tool skill installer
   │   ├── cloud_sync/         # Encrypted cloud sync vault
   │   ├── dbconn/             # Database connection management
@@ -97,7 +97,7 @@ src-tauri/                    # Rust backend
   │   └── lib.rs              # App entry, command registration
   └── Cargo.toml
 
-cli/                          # zxyssh binary: runs and administers the MCP service only
+cli/                          # zxyssh binary: runs and administers the MCP service only (pair, requests, approvals, agents, hostkey, credential)
 
 plugins/                      # Built-in plugin catalog (workspace member: zxyssh-plugins)
 ├── src/lib.rs                # Plugin spec: manifest types, validation, command rendering
@@ -134,6 +134,7 @@ Stores in `src/stores/` (`cloudSyncCoordinator.ts` is a non-store orchestrator a
 | `fileWorkspaceStore` | Open local/SFTP files + viewer state |
 | `fingerprintStore` | SSH host key verification |
 | `localShellStore` | Local terminal sessions |
+| `mcpPairingStore` | LAN Agent access: pairing code, approval queue, credential management, listener state |
 | `navigationStore` | View routing (main/settings) |
 | `notificationStore` | Toast notifications |
 | `recordingStore` | Session recording state |

@@ -4,7 +4,7 @@
 # Everything runs against a throwaway state directory under target/, so the
 # operator's real servers, credentials and paired Agents are never read or
 # written. No target SSH host is contacted: the checks cover the HTTP transport,
-# pairing, authentication, limits, audit-at-rest and revocation only.
+# pairing approval, authentication, limits, audit-at-rest and revocation only.
 #
 #   usage: bash scripts/test-lan-mcp-gateway.sh [interface-address]
 set -euo pipefail
@@ -89,9 +89,40 @@ mint() { # mint <state-dir> -> one-time code
   XDG_DATA_HOME="$1" "$BIN" mcp pair-code | sed -n 's/.*pairing code: \([0-9]\{6\}\).*/\1/p'
 }
 
-pair() { # pair <base> <name> <code> -> token
-  curl -s -m 8 -X POST "http://$1/pair" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$2\",\"code\":\"$3\"}" | json token
+client_key() { # client_key -> a fresh base64url X25519 public key
+  python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("="))'
+}
+
+pair_http() { # pair_http <base> <name> <code> [public-key] -> HTTP status
+  local body
+  if [ -n "${4:-}" ]; then
+    body="{\"name\":\"$2\",\"code\":\"$3\",\"clientPublicKey\":\"$4\"}"
+  else
+    body="{\"name\":\"$2\",\"code\":\"$3\"}"
+  fi
+  curl -s -o /dev/null -w '%{http_code}' -m 8 -X POST "http://$1/pair" \
+    -H 'Content-Type: application/json' -d "$body"
+}
+
+# Pair the shipped way: the reference client spends the code on a request, waits
+# for an operator, then opens the sealed delivery. Returns the token.
+pair() { # pair <base> <name> <code> <state-dir> -> token
+  local base=$1 name=$2 code=$3 state=$4 request=""
+  ( printf '%s\n' "$code" \
+      | XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp pair \
+          --endpoint "http://$base" --name "$name" > "$state/pair-client.log" 2>&1 ) &
+  local client=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    request=$(XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp requests list 2>/dev/null \
+      | awk '/^[0-9a-f]{8}-[0-9a-f]{4}/{print $1; exit}')
+    [ -n "$request" ] && break
+    sleep 0.5
+  done
+  [ -n "$request" ] || fail "no pairing request appeared for $name"
+  XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp requests approve "$request" >/dev/null \
+    || fail "could not approve request $request"
+  wait "$client" || fail "pairing client failed: $(cat "$state/pair-client.log")"
+  sed -n 's/.*sealed: \(vsh_[A-Za-z0-9_-]*\).*/\1/p' "$state/pair-client.log"
 }
 
 echo "== 1. a LAN listener is refused until an Agent is paired =="
@@ -111,12 +142,15 @@ expect "MCP without a token" "$(http_code "127.0.0.1:$PORT" "")" "401"
 expect "MCP with a forged token" "$(http_code "127.0.0.1:$PORT" "vsh_not_a_real_credential")" "401"
 
 CODE=$(mint "$LB"); [ "${#CODE}" = "6" ] || fail "no pairing code was minted"
-TOKEN=$(pair "127.0.0.1:$PORT" "smoke-loopback" "$CODE")
+expect "pairing without a client key is refused" \
+  "$(pair_http "127.0.0.1:$PORT" "no-key" "$CODE")" "400"
+# The refusal happens before the code is spent, so the same code still opens a
+# request once the client can read a sealed delivery.
+TOKEN=$(pair "127.0.0.1:$PORT" "smoke-loopback" "$CODE" "$LB")
 [ "${#TOKEN}" = "47" ] || fail "pairing returned no token: ${TOKEN:0:6}…"
-ok "one-time code exchanged for a 47-character Agent token"
-expect "the same code replayed" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -m 8 -X POST "http://127.0.0.1:$PORT/pair" \
-      -H 'Content-Type: application/json' -d "{\"name\":\"replay\",\"code\":\"$CODE\"}")" "401"
+ok "approved request returned a 47-character Agent token, sealed"
+expect "the same code replayed with a key" \
+  "$(pair_http "127.0.0.1:$PORT" "replay" "$CODE" "$(client_key)")" "401"
 
 EP=127.0.0.1:$PORT
 expect "initialize" "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json result serverInfo name)" "zxyssh"
@@ -167,7 +201,7 @@ else
   ok "listener opened on $LAN_IP:$PORT because an Agent was already paired"
   LEP=$LAN_IP:$PORT
   LCODE=$(mint "$LAN")
-  LTOKEN=$(pair "$LEP" "smoke-lan" "$LCODE")
+  LTOKEN=$(pair "$LEP" "smoke-lan" "$LCODE" "$LAN")
   [ "${#LTOKEN}" = "47" ] || fail "LAN pairing returned no token"
   ok "an Agent paired over $LAN_IP"
   expect "tools/list over the LAN address" \
