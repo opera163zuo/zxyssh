@@ -1,6 +1,6 @@
 {
   "name": "zxyssh",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Drive saved SSH sites through the zxySSH MCP service, with credentials held on the host.",
   "author": {
     "name": "zxySSH"

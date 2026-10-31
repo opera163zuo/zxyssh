@@ -7596,7 +7596,7 @@ dependencies = [
 
 [[package]]
 name = "zxyssh"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -7608,7 +7608,7 @@ dependencies = [
 
 [[package]]
 name = "zxyssh-desktop"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -7653,7 +7653,7 @@ dependencies = [
 
 [[package]]
 name = "zxyssh-plugins"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "serde",
  "serde_json",
