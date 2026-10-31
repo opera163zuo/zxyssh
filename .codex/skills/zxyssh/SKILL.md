@@ -26,7 +26,7 @@ POST /pair {"name":"<agent name>","code":"<six digits>"}
      -> 200 {"token":"..."}
 ```
 
-`zxyssh mcp pair --endpoint <url> --name <name>` is the reference client: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once.
+`zxyssh mcp pair --name <name>` is the reference client: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once. When run on the service host, it discovers the live listener address from zxySSH's local service status file; pass `--endpoint <url>` to pair from another machine or override that address.
 
 A client that offers `clientPublicKey` gets that credential sealed rather than printed in the response, which is what keeps it safe on a plain-HTTP listener:
 

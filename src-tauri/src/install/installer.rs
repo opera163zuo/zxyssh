@@ -142,6 +142,8 @@ mod tests {
             "name: zxyssh",
             "MCP endpoint",
             "zxyssh mcp pair-code",
+            "zxyssh mcp pair --name <name>",
+            "mcp-lan-status.json",
             "zxyssh mcp agents",
             "zxyssh mcp hostkey probe",
             "server_list",
