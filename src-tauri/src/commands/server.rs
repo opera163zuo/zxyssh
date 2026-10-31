@@ -148,10 +148,6 @@ pub fn update_server(
         .map_err(|e| format!("Failed to get server: {}", e))?
         .ok_or_else(|| "Server not found".to_string())?;
 
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    if updates.credentials.is_some() {
-        return Err("Saving credentials on mobile requires Keychain or Keystore support".into());
-    }
     if updates
         .auth_type
         .as_deref()
@@ -282,15 +278,6 @@ pub fn save_credential(
     db: State<'_, Arc<Database>>,
     request: SaveCredentialInput,
 ) -> Result<String, String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        let _ = (db, request);
-        return Err(
-            "Saving credentials on mobile requires Keychain or Keystore support".to_string(),
-        );
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     db.credential_save(
         &request.server_name,
         &request.auth_type,

@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::fs;
 use std::sync::Arc;
 
 use chrono::Utc;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,7 +11,6 @@ use tauri::State;
 use crate::commands::SessionAccessState;
 use crate::ipc::{IpcClient, IpcMessage};
 use crate::local_shell::LocalShellManager;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::plugins::MAX_MANIFEST_BYTES;
 use crate::plugins::{
     builtin_catalog, parse_manifest, ManifestValidationPolicy, PluginExecuteRequest,
@@ -64,36 +61,27 @@ pub fn plugin_install(
 
 #[tauri::command]
 pub async fn plugin_import(db: State<'_, Arc<Database>>) -> Result<Option<PluginRecord>, String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        let _ = db;
-        return Err("Plugin manifest import is unavailable on mobile".to_string());
+    let path = FileDialog::new()
+        .add_filter("zxySSH plugin manifest", &["json"])
+        .set_title("Import zxySSH Plugin")
+        .pick_file();
+
+    let Some(path) = path else {
+        return Ok(None);
+    };
+
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("Failed to inspect plugin manifest: {}", error))?;
+    if metadata.len() as usize > MAX_MANIFEST_BYTES {
+        return Err(format!(
+            "Plugin manifest exceeds the {} KB limit",
+            MAX_MANIFEST_BYTES / 1024
+        ));
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let path = FileDialog::new()
-            .add_filter("zxySSH plugin manifest", &["json"])
-            .set_title("Import zxySSH Plugin")
-            .pick_file();
-
-        let Some(path) = path else {
-            return Ok(None);
-        };
-
-        let metadata = fs::metadata(&path)
-            .map_err(|error| format!("Failed to inspect plugin manifest: {}", error))?;
-        if metadata.len() as usize > MAX_MANIFEST_BYTES {
-            return Err(format!(
-                "Plugin manifest exceeds the {} KB limit",
-                MAX_MANIFEST_BYTES / 1024
-            ));
-        }
-
-        let manifest_json = fs::read_to_string(&path)
-            .map_err(|error| format!("Failed to read plugin manifest: {}", error))?;
-        install_external_manifest(&db, &manifest_json).map(Some)
-    }
+    let manifest_json = fs::read_to_string(&path)
+        .map_err(|error| format!("Failed to read plugin manifest: {}", error))?;
+    install_external_manifest(&db, &manifest_json).map(Some)
 }
 
 /// Export a plugin manifest as a portable, spec-compliant JSON file. Installed
@@ -107,34 +95,25 @@ pub async fn plugin_export(
     db: State<'_, Arc<Database>>,
     request: PluginExportRequest,
 ) -> Result<Option<String>, String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        let _ = (&db, &request);
-        return Err("Plugin manifest export is unavailable on mobile".to_string());
-    }
+    let manifest = export_manifest_for(&db, &request.plugin_id)?;
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let manifest = export_manifest_for(&db, &request.plugin_id)?;
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|error| format!("Failed to encode plugin manifest: {}", error))?
+        + "\n";
 
-        let manifest_json = serde_json::to_string_pretty(&manifest)
-            .map_err(|error| format!("Failed to encode plugin manifest: {}", error))?
-            + "\n";
+    let path = FileDialog::new()
+        .add_filter("zxySSH plugin manifest", &["json"])
+        .set_title("Export zxySSH Plugin")
+        .set_file_name(format!("{}-{}.plugin.json", manifest.id, manifest.version))
+        .save_file();
 
-        let path = FileDialog::new()
-            .add_filter("zxySSH plugin manifest", &["json"])
-            .set_title("Export zxySSH Plugin")
-            .set_file_name(format!("{}-{}.plugin.json", manifest.id, manifest.version))
-            .save_file();
+    let Some(path) = path else {
+        return Ok(None);
+    };
 
-        let Some(path) = path else {
-            return Ok(None);
-        };
-
-        fs::write(&path, manifest_json)
-            .map_err(|error| format!("Failed to write plugin manifest: {}", error))?;
-        Ok(Some(path.to_string_lossy().into_owned()))
-    }
+    fs::write(&path, manifest_json)
+        .map_err(|error| format!("Failed to write plugin manifest: {}", error))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 fn export_manifest_for(db: &Database, plugin_id: &str) -> Result<PluginManifest, String> {
@@ -254,7 +233,6 @@ pub async fn plugin_execute(
 
 /// Capture at most one plugin-sized buffer per stream, but keep draining both
 /// streams so a verbose child cannot deadlock on a full pipe. All work is timed.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) async fn run_local_command(
     command: &str,
     stdin: Option<&str>,
@@ -398,7 +376,6 @@ fn install_builtin(db: &Database, plugin_id: &str) -> Result<PluginRecord, Strin
     record_from_installation(&installation)
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn install_external_manifest(db: &Database, manifest_json: &str) -> Result<PluginRecord, String> {
     let manifest = parse_manifest(manifest_json, ManifestValidationPolicy::External)?;
     if builtin_catalog()?
@@ -731,7 +708,6 @@ mod tests {
         assert!(agent::describe(&db, "does-not-exist", true).is_err());
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[tokio::test]
     async fn imported_plugin_api_enforces_grants_inputs_and_exact_reviewed_command() {
         use crate::plugins::{agent, PluginExecuteRequest};

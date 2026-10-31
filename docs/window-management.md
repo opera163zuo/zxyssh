@@ -13,9 +13,12 @@ window acknowledges the handoff. Creating a native window unsuccessfully must
 leave the source tab intact. Terminal handoff reattaches to the existing session;
 it does not run a new shell command or reconnect an SSH session.
 
-On macOS and Windows, dragging the detached titlebar back over the main tab
-strip returns the tab. Dropping over a main-window page edge creates a split.
-Release of the actual primary mouse button ends the gesture; Escape cancels it.
+On macOS the app can read the physical button state, so dragging the detached
+titlebar back over the main tab strip returns the tab and dropping over a
+main-window page edge creates a split; release of the actual primary mouse
+button ends the gesture and Escape cancels it. On Linux that state is not
+available, so a detached window uses native window dragging plus the return
+button instead of automatic drop detection.
 A plain titlebar click does not start a drag. The return button is also available.
 Closing a detached window returns its page, whereas closing a terminal tab asks
 for confirmation before terminating that session.
@@ -63,7 +66,7 @@ shell, close/cancel confirmation, left and top pane moves, native tear-out,
 return button, native-message bottom docking, save, application close, fresh
 application startup, changed session IDs with the same two-pane layout.
 Synthetic DOM events are not an OS-level physical mouse test. Mixed-DPI physical
-multi-monitor dragging and Windows/Linux desktop runs require separate manual QA.
-On platforms without a native primary-button state implementation, native
-window dragging and the return button remain available; automatic cross-window
-mouse-release docking is currently implemented for macOS and Windows.
+multi-monitor dragging on Linux requires separate manual QA.
+Linux has no native primary-button state implementation, so automatic
+cross-window mouse-release docking is currently macOS-only; there the return
+button and native window dragging carry the gesture instead.

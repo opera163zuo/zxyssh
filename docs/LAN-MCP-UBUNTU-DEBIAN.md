@@ -66,37 +66,36 @@ To keep the user service running after logout, enable lingering for this account
 sudo loginctl enable-linger "$USER"
 ```
 
-A correct code does not buy a credential any more. It opens a **pairing request**, which waits until an operator decides, so an unattended machine cannot enroll itself:
+A correct code is the whole handshake: there is no approval step, and no
+operator has to be at the keyboard for an Agent to enroll.
+
+```text
+POST /pair          {"name":"hermes","code":"481516"}
+     -> 200 {"token":"vsh_…"}
+```
+
+A client that offers an ephemeral X25519 `clientPublicKey` gets the credential
+sealed instead of printed in the response, which is what keeps it safe on a
+plain-HTTP listener:
 
 ```text
 POST /pair          {"name":"hermes","code":"481516","clientPublicKey":"<base64url X25519>"}
      -> 202 {"requestId":"…","status":"awaiting_approval","pollPath":"/pair/status"}
 POST /pair/status   {"requestId":"…"}
-     -> 200 {"status":"awaiting_approval"}            # still waiting
      -> 200 {"status":"delivered","agentId":"…","serverPublicKey":"…","sealedToken":"…"}
 ```
 
-Decide from the desktop panel, which lists the requested name and the source address, or from the terminal:
-
-```bash
-~/.local/bin/zxyssh mcp requests list
-~/.local/bin/zxyssh mcp requests approve <request-id>
-~/.local/bin/zxyssh mcp requests reject <request-id>
-```
-
-An approved credential is handed out exactly once, and only sealed to the
-requesting Agent's ephemeral key: the service performs an X25519 agreement with
-the `clientPublicKey` and derives an AES-256-GCM key scoped to that request id,
-so a listener on the segment cannot recover the token. A request that was never
-answered expires after 900 seconds and the code is already spent, so a new code
-is needed. While the queue is on, a pairing body without `clientPublicKey` is
-refused with `400` and the code stays unspent, because the client could not read
-a sealed delivery. `zxyssh mcp approvals --set off` restores the 2.0 behaviour of
-issuing a cleartext credential immediately.
+The `202` and the `awaiting_approval` name are the sealed-delivery handshake, not
+a queue: the service derives an AES-256-GCM key from the agreement, scoped to
+that request id, the moment the code is spent, so a listener on the segment
+cannot recover the token, and the first poll takes it away exactly once. A
+sealed request nobody polls expires after 900 seconds and the code is already
+spent, so a fresh code is needed. A keyless client still receives its credential
+in the clear.
 
 On the machine that wants to become an Agent, the same protocol is available as a
-command; it reads the code from stdin, waits for the approval and prints the
-credential once:
+command; it reads the code from stdin, collects the credential (sealed when it
+offers a key) and prints it once:
 
 ```bash
 ~/.local/bin/zxyssh mcp pair --endpoint http://192.168.0.96:8765 --name hermes-laptop

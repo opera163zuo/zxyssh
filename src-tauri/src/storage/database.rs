@@ -5,30 +5,13 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::sync::{self, SyncEntityKind};
 use crate::storage::models::{
-    AuthType, CommandHistoryEntry, CommandSnippet, DatabaseConnection, PluginInstallation,
-    Recording, Server, TunnelConfig, TunnelType,
+    AuthType, CommandHistoryEntry, CommandSnippet, PluginInstallation, Recording, Server,
+    TunnelConfig, TunnelType,
 };
 
 pub struct Database {
     pub(super) conn: Mutex<Connection>,
-}
-
-fn row_to_database_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<DatabaseConnection> {
-    Ok(DatabaseConnection {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        engine: row.get(2)?,
-        host: row.get(3)?,
-        port: row.get::<_, i64>(4)? as u16,
-        username: row.get(5)?,
-        password_encrypted: row.get(6)?,
-        default_database: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
-        last_connected_at: row.get(10)?,
-    })
 }
 
 fn row_to_plugin_installation(row: &rusqlite::Row<'_>) -> rusqlite::Result<PluginInstallation> {
@@ -72,7 +55,7 @@ impl Database {
     }
 
     fn init_schema(&self) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
 
         // SQLite does not enforce declared foreign keys unless enabled per connection.
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -217,8 +200,6 @@ impl Database {
             let _ = conn.execute(sql, []);
         }
 
-        sync::initialize(&mut conn)?;
-
         migrate_plaintext_credentials(&conn)?;
 
         Ok(())
@@ -332,7 +313,6 @@ impl Database {
             ],
         )?;
 
-        sync::record_server_upsert(&tx, server, server.created_at, server.updated_at)?;
         tx.commit()?;
 
         Ok(())
@@ -437,7 +417,7 @@ impl Database {
                 rusqlite::params![Uuid::new_v4().to_string(), server.name, auth_type_str, encrypted, encrypted_phrase, key_path, now],
             )?;
         }
-        let changed = tx.execute(
+        tx.execute(
             r#"UPDATE servers SET
                name = ?2, host = ?3, port = ?4, username = ?5, auth_type = ?6,
                credential_id = ?7, group_id = ?8, tags = ?9, updated_at = ?10,
@@ -459,10 +439,6 @@ impl Database {
                 server.agent_forwarding as i32,
             ],
         )?;
-
-        if changed > 0 {
-            sync::record_server_upsert(&tx, server, server.created_at, now)?;
-        }
         tx.commit()?;
 
         Ok(())
@@ -472,9 +448,8 @@ impl Database {
     pub fn server_delete(&self, id: &str) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        sync::detach_server_references(&tx, id, true)?;
+        detach_server_references(&tx, id)?;
         tx.execute("DELETE FROM servers WHERE id = ?1", [id])?;
-        sync::record_local_delete(&tx, SyncEntityKind::Server, id)?;
         tx.commit()?;
         Ok(())
     }
@@ -575,7 +550,6 @@ impl Database {
             rusqlite::params![group.id, group.name, group.parent_id, group.color],
         )?;
 
-        sync::record_group_upsert(&tx, group)?;
         tx.commit()?;
 
         Ok(())
@@ -585,9 +559,8 @@ impl Database {
     pub fn group_delete(&self, id: &str) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        sync::detach_group_references(&tx, id, true)?;
+        detach_group_references(&tx, id)?;
         tx.execute("DELETE FROM groups WHERE id = ?1", [id])?;
-        sync::record_local_delete(&tx, SyncEntityKind::Group, id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1272,7 +1245,6 @@ impl Database {
                 snippet.updated_at,
             ],
         )?;
-        sync::record_snippet_upsert(&tx, snippet, snippet.created_at, snippet.updated_at)?;
         tx.commit()?;
         Ok(())
     }
@@ -1284,7 +1256,7 @@ impl Database {
         let tags_json = serde_json::to_string(&snippet.tags)?;
 
         let tx = conn.transaction()?;
-        let changed = tx.execute(
+        tx.execute(
             r#"UPDATE command_snippets SET
                name = ?2, command = ?3, category = ?4, description = ?5, tags = ?6, updated_at = ?7
                WHERE id = ?1"#,
@@ -1298,9 +1270,6 @@ impl Database {
                 now,
             ],
         )?;
-        if changed > 0 {
-            sync::record_snippet_upsert(&tx, snippet, snippet.created_at, now)?;
-        }
         tx.commit()?;
         Ok(())
     }
@@ -1310,7 +1279,6 @@ impl Database {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM command_snippets WHERE id = ?1", [id])?;
-        sync::record_local_delete(&tx, SyncEntityKind::CommandSnippet, id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1487,12 +1455,12 @@ impl Database {
             server_id
         {
             (
-                "SELECT id, session_id, server_id, started_at, ended_at, file_path, sync_status FROM recordings WHERE server_id = ?1 ORDER BY started_at DESC",
+                "SELECT id, session_id, server_id, started_at, ended_at, file_path FROM recordings WHERE server_id = ?1 ORDER BY started_at DESC",
                 vec![Box::new(sid.to_string())],
             )
         } else {
             (
-                "SELECT id, session_id, server_id, started_at, ended_at, file_path, sync_status FROM recordings ORDER BY started_at DESC",
+                "SELECT id, session_id, server_id, started_at, ended_at, file_path FROM recordings ORDER BY started_at DESC",
                 vec![],
             )
         };
@@ -1500,12 +1468,6 @@ impl Database {
         let mut stmt = conn.prepare(sql)?;
         let recordings = stmt
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                let sync_str: String = row.get(6)?;
-                let sync_status = match sync_str.as_str() {
-                    "syncing" => crate::storage::models::SyncStatus::Syncing,
-                    "synced" => crate::storage::models::SyncStatus::Synced,
-                    _ => crate::storage::models::SyncStatus::Local,
-                };
                 Ok(Recording {
                     id: row.get(0)?,
                     session_id: row.get(1)?,
@@ -1513,7 +1475,6 @@ impl Database {
                     started_at: row.get(3)?,
                     ended_at: row.get(4)?,
                     file_path: row.get(5)?,
-                    sync_status,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1529,15 +1490,9 @@ impl Database {
             recording.id = Uuid::new_v4().to_string();
         }
 
-        let sync_str = match &recording.sync_status {
-            crate::storage::models::SyncStatus::Local => "local",
-            crate::storage::models::SyncStatus::Syncing => "syncing",
-            crate::storage::models::SyncStatus::Synced => "synced",
-        };
-
         conn.execute(
-            r#"INSERT INTO recordings (id, session_id, server_id, started_at, ended_at, file_path, sync_status)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
+            r#"INSERT INTO recordings (id, session_id, server_id, started_at, ended_at, file_path)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
             rusqlite::params![
                 recording.id,
                 recording.session_id,
@@ -1545,7 +1500,6 @@ impl Database {
                 recording.started_at,
                 recording.ended_at,
                 recording.file_path,
-                sync_str,
             ],
         )?;
         Ok(())
@@ -1572,15 +1526,9 @@ impl Database {
     pub fn recording_get(&self, id: &str) -> Result<Option<Recording>> {
         let conn = self.conn.lock().unwrap();
         let result = conn.query_row(
-            "SELECT id, session_id, server_id, started_at, ended_at, file_path, sync_status FROM recordings WHERE id = ?1",
+            "SELECT id, session_id, server_id, started_at, ended_at, file_path FROM recordings WHERE id = ?1",
             [id],
             |row| {
-                let sync_str: String = row.get(6)?;
-                let sync_status = match sync_str.as_str() {
-                    "syncing" => crate::storage::models::SyncStatus::Syncing,
-                    "synced" => crate::storage::models::SyncStatus::Synced,
-                    _ => crate::storage::models::SyncStatus::Local,
-                };
                 Ok(Recording {
                     id: row.get(0)?,
                     session_id: row.get(1)?,
@@ -1588,7 +1536,6 @@ impl Database {
                     started_at: row.get(3)?,
                     ended_at: row.get(4)?,
                     file_path: row.get(5)?,
-                    sync_status,
                 })
             },
         );
@@ -1601,83 +1548,6 @@ impl Database {
     }
 
     // === Plugin Operations ===
-
-    // -----------------------------------------------------------------------
-    // Database connections
-    // -----------------------------------------------------------------------
-
-    pub fn database_connection_list(&self) -> Result<Vec<DatabaseConnection>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, engine, host, port, username, password_encrypted, \
-             default_database, created_at, updated_at, last_connected_at \
-             FROM database_connections ORDER BY name COLLATE NOCASE ASC",
-        )?;
-        let records = stmt
-            .query_map([], row_to_database_connection)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(records)
-    }
-
-    pub fn database_connection_get(&self, id: &str) -> Result<Option<DatabaseConnection>> {
-        let conn = self.conn.lock().unwrap();
-        let result = conn.query_row(
-            "SELECT id, name, engine, host, port, username, password_encrypted, \
-             default_database, created_at, updated_at, last_connected_at \
-             FROM database_connections WHERE id = ?1",
-            [id],
-            row_to_database_connection,
-        );
-        match result {
-            Ok(record) => Ok(Some(record)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    pub fn database_connection_upsert(&self, connection: &DatabaseConnection) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO database_connections \
-             (id, name, engine, host, port, username, password_encrypted, \
-              default_database, created_at, updated_at, last_connected_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-             ON CONFLICT(id) DO UPDATE SET \
-               name = excluded.name, engine = excluded.engine, host = excluded.host, \
-               port = excluded.port, username = excluded.username, \
-               password_encrypted = excluded.password_encrypted, \
-               default_database = excluded.default_database, updated_at = excluded.updated_at",
-            rusqlite::params![
-                connection.id,
-                connection.name,
-                connection.engine,
-                connection.host,
-                connection.port,
-                connection.username,
-                connection.password_encrypted,
-                connection.default_database,
-                connection.created_at,
-                connection.updated_at,
-                connection.last_connected_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn database_connection_touch(&self, id: &str, connected_at: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE database_connections SET last_connected_at = ?2 WHERE id = ?1",
-            rusqlite::params![id, connected_at],
-        )?;
-        Ok(())
-    }
-
-    pub fn database_connection_delete(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM database_connections WHERE id = ?1", [id])?;
-        Ok(())
-    }
 
     pub fn plugin_installation_list(&self) -> Result<Vec<PluginInstallation>> {
         let conn = self.conn.lock().unwrap();
@@ -1740,7 +1610,6 @@ impl Database {
             ],
         )?;
 
-        sync::record_plugin_installation_upsert(&tx, installation)?;
         tx.commit()?;
         Ok(())
     }
@@ -1756,10 +1625,6 @@ impl Database {
             "UPDATE plugin_installations SET settings_json = ?2, updated_at = ?3 WHERE plugin_id = ?1",
             rusqlite::params![plugin_id, settings_json, Utc::now().timestamp()],
         )?;
-
-        // Re-record from the stored row so the synced payload reflects the
-        // bumped updated_at timestamp.
-        sync::record_current_upsert(&tx, SyncEntityKind::PluginInstallation, plugin_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1772,7 +1637,6 @@ impl Database {
             [plugin_id],
         )?;
 
-        sync::record_local_delete(&tx, SyncEntityKind::PluginInstallation, plugin_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1799,6 +1663,31 @@ impl Database {
         )?;
         Ok(())
     }
+}
+
+/// Clear `servers.group_id` and nested `groups.parent_id` before a group
+/// disappears. Neither column is a declared foreign key, so SQLite has no
+/// `ON DELETE` rule to lean on and would otherwise leave dangling ids.
+fn detach_group_references(conn: &Connection, group_id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE groups SET parent_id = NULL WHERE parent_id = ?1",
+        [group_id],
+    )?;
+    conn.execute(
+        "UPDATE servers SET group_id = NULL WHERE group_id = ?1",
+        [group_id],
+    )?;
+    Ok(())
+}
+
+/// Clear `jump_host_id` on every site routed through a server about to be
+/// deleted; the column carries no foreign key, so the reference must go first.
+fn detach_server_references(conn: &Connection, server_id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE servers SET jump_host_id = NULL WHERE jump_host_id = ?1",
+        [server_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

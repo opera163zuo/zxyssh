@@ -18,18 +18,7 @@ fn open_url_with_system(url: &str) -> std::io::Result<std::process::ExitStatus> 
     std::process::Command::new("open").arg(url).status()
 }
 
-#[cfg(target_os = "windows")]
-fn open_url_with_system(url: &str) -> std::io::Result<std::process::ExitStatus> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", url])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-}
-
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+#[cfg(not(target_os = "macos"))]
 fn open_url_with_system(url: &str) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("xdg-open").arg(url).status()
 }

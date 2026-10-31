@@ -677,14 +677,12 @@ function App() {
         <Notifications />
 
         <div className="flex-1 flex overflow-hidden">
-          {!runtimeCapabilities.isMobile && (
-            <ServerSidebar
-              connectedServerIds={connectedServerIds}
-              onConnect={handleConnect}
-              onAddServer={handleAddServer}
-              onEditServer={handleEditServer}
-            />
-          )}
+          <ServerSidebar
+            connectedServerIds={connectedServerIds}
+            onConnect={handleConnect}
+            onAddServer={handleAddServer}
+            onEditServer={handleEditServer}
+          />
           <main className="main-workspace flex-1 flex flex-col min-w-0 relative overflow-x-hidden w-full max-w-full">
             <SessionTabs
               onNewSession={handleNewSession}

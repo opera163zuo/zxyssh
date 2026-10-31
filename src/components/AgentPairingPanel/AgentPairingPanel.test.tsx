@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { useMcpPairingStore, type PairingRequest } from '../../stores/mcpPairingStore';
+import { useMcpPairingStore } from '../../stores/mcpPairingStore';
 import { AgentPairingPanel } from './AgentPairingPanel';
 
 vi.mock('react-i18next', () => ({
@@ -10,9 +10,7 @@ vi.mock('react-i18next', () => ({
 
 const defaults = {
   code: null,
-  requests: [] as PairingRequest[],
   agents: [] as { id: string; name: string; revoked: boolean }[],
-  approvalRequired: true,
   lanStatus: null,
   issuedToken: null,
   busy: false,
@@ -24,41 +22,16 @@ beforeEach(() => {
     ...defaults,
     refresh: vi.fn(async () => {}),
     createCode: vi.fn(async () => {}),
-    approve: vi.fn(async () => {}),
-    reject: vi.fn(async () => {}),
     revoke: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     rotate: vi.fn(async () => {}),
     dismissIssuedToken: vi.fn(),
-    setApprovalRequired: vi.fn(async () => {}),
   });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-});
-
-it('shows an awaiting request with its peer and wires the decision buttons', () => {
-  useMcpPairingStore.setState({
-    requests: [
-      {
-        id: 'req-1',
-        agentName: 'hermes-laptop',
-        peer: '192.168.0.20',
-        createdAt: 1,
-        expiresAt: Math.floor(Date.now() / 1000) + 300,
-        status: 'awaiting_approval',
-      },
-    ],
-  });
-  render(<AgentPairingPanel />);
-  expect(screen.getByText('hermes-laptop')).toBeInTheDocument();
-  expect(screen.getByText('192.168.0.20')).toBeInTheDocument();
-  fireEvent.click(screen.getByText('settings.pairingApprove'));
-  expect(useMcpPairingStore.getState().approve).toHaveBeenCalledWith('req-1');
-  fireEvent.click(screen.getByText('settings.pairingReject'));
-  expect(useMcpPairingStore.getState().reject).toHaveBeenCalledWith('req-1');
 });
 
 it('creates a pairing code and then shows it with its countdown', async () => {
@@ -109,11 +82,9 @@ it('reports the listener state and surfaces a store error', () => {
       bind: '192.168.0.96:8765',
       allowLan: true,
       credentialSealing: true,
-      approvalRequired: true,
       pid: 4242,
       startedAt: 1,
       activeAgents: 2,
-      pendingRequests: 1,
     },
     error: 'Agent registry is unreadable and was not modified: boom',
   });

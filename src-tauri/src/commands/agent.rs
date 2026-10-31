@@ -7,12 +7,10 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::mcp::approval::ApprovalStatus;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::mcp::approval::AUTO_APPROVE_UNTIL_KEY;
 use crate::mcp::guard::{GuardConfig, GUARD_CONFIG_KEY};
 use crate::storage::Database;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::mcp::{AgentApprovalManager, ApprovalOutcome};
 
 /// Read the encrypted Agent activity history for the desktop panel.
@@ -57,7 +55,6 @@ pub struct ResolveApprovalRequest {
 
 /// Resolve a pending approval and optionally open an auto-approve window.
 #[tauri::command]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn resolve_agent_approval(
     approvals: State<'_, Arc<AgentApprovalManager>>,
     db: State<'_, Arc<Database>>,
@@ -87,32 +84,14 @@ pub fn resolve_agent_approval(
     }
 }
 
-/// Mobile builds have no Agent Gateway, so approvals never fire.
-#[tauri::command]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn resolve_agent_approval(_request: ResolveApprovalRequest) -> Result<(), String> {
-    Ok(())
-}
-
 /// Report the current auto-approve deadline (if any).
 #[tauri::command]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn get_agent_guard_status(approvals: State<'_, Arc<AgentApprovalManager>>) -> ApprovalStatus {
     approvals.status()
 }
 
-#[tauri::command]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn get_agent_guard_status() -> ApprovalStatus {
-    ApprovalStatus {
-        auto_approve_until: None,
-        pending: Vec::new(),
-    }
-}
-
 /// Close the auto-approve window immediately.
 #[tauri::command]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn cancel_agent_auto_approve(
     approvals: State<'_, Arc<AgentApprovalManager>>,
     db: State<'_, Arc<Database>>,
@@ -120,12 +99,6 @@ pub fn cancel_agent_auto_approve(
     db.set_setting(AUTO_APPROVE_UNTIL_KEY, "0")
         .map_err(|error| error.to_string())?;
     approvals.cancel_auto_approve();
-    Ok(())
-}
-
-#[tauri::command]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn cancel_agent_auto_approve() -> Result<(), String> {
     Ok(())
 }
 
@@ -155,9 +128,7 @@ pub fn set_agent_guard_config(
 /// the encrypted registry with `zxyssh mcp`, so the desktop and the terminal are
 /// two views of one list.
 use crate::mcp::lan_status::{self, LanListenerStatus};
-use crate::mcp::pairing::{
-    AgentSummary, IssuedAgent, PairRequestSummary, PairingError, PairingRegistry,
-};
+use crate::mcp::pairing::{AgentSummary, IssuedAgent, PairingError, PairingRegistry};
 
 fn registry(db: &State<'_, Arc<Database>>) -> Result<PairingRegistry, String> {
     PairingRegistry::load(db.inner().clone()).map_err(registry_error)
@@ -173,10 +144,6 @@ fn registry_error(error: PairingError) -> String {
         PairingError::InvalidName => "Agent name must be 1-80 characters".to_string(),
         PairingError::InvalidClientKey => {
             "clientPublicKey must be a base64url-encoded 32-byte X25519 key".to_string()
-        }
-        PairingError::ClientKeyRequired => {
-            "Approval mode delivers credentials sealed, so a pairing request must include              clientPublicKey"
-                .to_string()
         }
     }
 }
@@ -199,34 +166,6 @@ pub fn mcp_pair_code_create(db: State<'_, Arc<Database>>) -> Result<PairingCode,
         .pending_expires_at()
         .unwrap_or(now + crate::mcp::pairing::PAIRING_TTL_SECONDS);
     Ok(PairingCode { code, expires_at })
-}
-
-#[tauri::command]
-pub fn mcp_pair_requests_list(
-    db: State<'_, Arc<Database>>,
-) -> Result<Vec<PairRequestSummary>, String> {
-    let registry = registry(&db)?;
-    Ok(registry.list_requests(chrono::Utc::now().timestamp()))
-}
-
-#[tauri::command]
-pub fn mcp_pair_request_approve(
-    db: State<'_, Arc<Database>>,
-    request_id: String,
-) -> Result<Option<AgentSummary>, String> {
-    let mut registry = registry(&db)?;
-    registry
-        .approve_request(&request_id, chrono::Utc::now().timestamp())
-        .map_err(registry_error)
-}
-
-#[tauri::command]
-pub fn mcp_pair_request_reject(
-    db: State<'_, Arc<Database>>,
-    request_id: String,
-) -> Result<bool, String> {
-    let mut registry = registry(&db)?;
-    registry.reject_request(&request_id).map_err(registry_error)
 }
 
 #[tauri::command]
@@ -260,23 +199,6 @@ pub fn mcp_agent_rotate(
 ) -> Result<Option<IssuedAgent>, String> {
     let mut registry = registry(&db)?;
     registry.rotate(&agent_id).map_err(registry_error)
-}
-
-#[tauri::command]
-pub fn mcp_pairing_approval_get(db: State<'_, Arc<Database>>) -> Result<bool, String> {
-    Ok(registry(&db)?.pairing_approval_required())
-}
-
-#[tauri::command]
-pub fn mcp_pairing_approval_set(
-    db: State<'_, Arc<Database>>,
-    required: bool,
-) -> Result<bool, String> {
-    let mut registry = registry(&db)?;
-    registry
-        .set_pairing_approval_required(required)
-        .map_err(registry_error)?;
-    Ok(registry.pairing_approval_required())
 }
 
 /// What the LAN service published about its listener, or `None` when no live

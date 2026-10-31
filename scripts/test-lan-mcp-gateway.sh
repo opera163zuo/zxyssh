@@ -104,24 +104,13 @@ pair_http() { # pair_http <base> <name> <code> [public-key] -> HTTP status
     -H 'Content-Type: application/json' -d "$body"
 }
 
-# Pair the shipped way: the reference client spends the code on a request, waits
-# for an operator, then opens the sealed delivery. Returns the token.
+# Pair the shipped way: the reference client spends the code, then fetches the
+# credential sealed to its own ephemeral key from /pair/status. Returns the token.
 pair() { # pair <base> <name> <code> <state-dir> -> token
-  local base=$1 name=$2 code=$3 state=$4 request=""
-  ( printf '%s\n' "$code" \
-      | XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp pair \
-          --endpoint "http://$base" --name "$name" > "$state/pair-client.log" 2>&1 ) &
-  local client=$!
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    request=$(XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp requests list 2>/dev/null \
-      | awk '/^[0-9a-f]{8}-[0-9a-f]{4}/{print $1; exit}')
-    [ -n "$request" ] && break
-    sleep 0.5
-  done
-  [ -n "$request" ] || fail "no pairing request appeared for $name"
-  XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp requests approve "$request" >/dev/null \
-    || fail "could not approve request $request"
-  wait "$client" || fail "pairing client failed: $(cat "$state/pair-client.log")"
+  local base=$1 name=$2 code=$3 state=$4
+  printf '%s\n' "$code" | XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp pair \
+    --endpoint "http://$base" --name "$name" > "$state/pair-client.log" 2>&1 \
+    || fail "pairing client failed: $(cat "$state/pair-client.log")"
   sed -n 's/.*sealed: \(vsh_[A-Za-z0-9_-]*\).*/\1/p' "$state/pair-client.log"
 }
 
@@ -141,16 +130,17 @@ expect "health over loopback" "$(curl -s -m 3 "http://127.0.0.1:$PORT/health" | 
 expect "MCP without a token" "$(http_code "127.0.0.1:$PORT" "")" "401"
 expect "MCP with a forged token" "$(http_code "127.0.0.1:$PORT" "vsh_not_a_real_credential")" "401"
 
-CODE=$(mint "$LB"); [ "${#CODE}" = "6" ] || fail "no pairing code was minted"
-expect "pairing without a client key is refused" \
-  "$(pair_http "127.0.0.1:$PORT" "no-key" "$CODE")" "400"
-# The refusal happens before the code is spent, so the same code still opens a
-# request once the client can read a sealed delivery.
+CODE=$(mint "$LB"); [ "${#CODE}" = "6" ] || fail "no pairing code was spent"
+expect "pairing without a client key completes in one step" \
+  "$(pair_http "127.0.0.1:$PORT" "no-key" "$CODE")" "200"
+# One step means the code is spent by that answer, not banked for an approval.
+expect "the same code cannot be spent twice" \
+  "$(pair_http "127.0.0.1:$PORT" "replay" "$CODE" "$(client_key)")" "401"
+
+CODE=$(mint "$LB")
 TOKEN=$(pair "127.0.0.1:$PORT" "smoke-loopback" "$CODE" "$LB")
 [ "${#TOKEN}" = "47" ] || fail "pairing returned no token: ${TOKEN:0:6}…"
-ok "approved request returned a 47-character Agent token, sealed"
-expect "the same code replayed with a key" \
-  "$(pair_http "127.0.0.1:$PORT" "replay" "$CODE" "$(client_key)")" "401"
+ok "a sealed pairing returned a 47-character Agent token"
 
 EP=127.0.0.1:$PORT
 expect "initialize" "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json result serverInfo name)" "zxyssh"

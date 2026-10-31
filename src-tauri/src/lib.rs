@@ -1,12 +1,9 @@
 #[cfg(test)]
 mod acl_tests;
-pub mod cloud_sync;
 pub mod commands;
-pub mod dbconn;
 pub mod install;
 pub mod ipc;
 pub mod local_shell;
-pub mod logging;
 pub mod mcp;
 pub mod platform;
 pub mod plugins;
@@ -15,9 +12,7 @@ pub mod replay;
 pub mod session;
 pub mod sftp;
 pub mod ssh;
-pub mod ssh_import;
 pub mod storage;
-pub mod tunnel;
 
 use std::sync::Arc;
 
@@ -35,28 +30,10 @@ use commands::{
     clear_fingerprints,
     clear_sudo_credential,
     clear_sudo_policy,
-    cloud_sync_create_vault,
-    cloud_sync_export_file,
-    cloud_sync_import_file,
-    cloud_sync_join_vault,
-    cloud_sync_lock,
-    cloud_sync_now,
-    cloud_sync_status,
     credential_status,
-    db_connection_columns,
-    db_connection_databases,
-    db_connection_delete,
-    db_connection_list,
-    db_connection_probe,
-    db_connection_query,
-    db_connection_save,
-    db_connection_tables,
-    db_connection_test,
-    db_session_detect,
     delete_fingerprint,
     delete_fingerprint_by_id,
     delete_group,
-    delete_recording,
     delete_server,
     detect_ai_tools,
     get_agent_guard_config,
@@ -68,11 +45,8 @@ use commands::{
     get_runtime_capabilities,
     get_server_status,
     get_servers,
-    get_session_recording_id,
     install_to_tool,
-    is_session_recording,
     list_fingerprints,
-    list_recordings,
     load_settings,
     local_shell_attach,
     local_shell_create,
@@ -93,11 +67,6 @@ use commands::{
     mcp_agents_list,
     mcp_lan_status,
     mcp_pair_code_create,
-    mcp_pair_request_approve,
-    mcp_pair_request_reject,
-    mcp_pair_requests_list,
-    mcp_pairing_approval_get,
-    mcp_pairing_approval_set,
     open_external_url,
     pick_directory_for_upload,
     pick_download_directory,
@@ -141,11 +110,6 @@ use commands::{
     sftp_upload_directory,
     sftp_upload_file,
     sftp_write_file,
-    // Snippet commands
-    // Logging/recording commands
-    start_recording,
-    stop_recording,
-    // Tunnel commands
     uninstall_from_tool,
     update_server,
     verify_fingerprint,
@@ -155,9 +119,7 @@ use commands::{
     SftpState,
 };
 
-use cloud_sync::CloudSyncManager;
 use local_shell::LocalShellManager;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::Emitter;
 use tauri::Manager;
 
@@ -173,21 +135,8 @@ fn open_devtools(webview: tauri::WebviewWindow) {
 }
 
 #[tauri::command]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn get_agent_gateway_status(gateway: tauri::State<'_, AgentGateway>) -> AgentGatewayStatus {
     gateway.status()
-}
-
-#[tauri::command]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-fn get_agent_gateway_status() -> AgentGatewayStatus {
-    AgentGatewayStatus {
-        running: false,
-        endpoint: None,
-        manifest_path: String::new(),
-        pid: None,
-        protocol_version: String::new(),
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -201,7 +150,6 @@ pub fn run() {
     let builder =
         tauri::Builder::default().manage(commands::local_files::PendingOpenFiles::default());
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             commands::local_files::queue_file_arguments(app, args, std::path::Path::new(&cwd));
@@ -218,7 +166,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             commands::local_files::install_workspace_menu(app)?;
             if let Ok(cwd) = std::env::current_dir() {
                 commands::local_files::queue_file_arguments(app.handle(), std::env::args(), &cwd);
@@ -226,7 +173,6 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data_dir)?;
 
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let primary_install = app.config().identifier == "com.zxyssh.desktop";
 
             let database = Arc::new(Database::new_at(platform::database_path(&app_data_dir))?);
@@ -242,15 +188,6 @@ pub fn run() {
             // subsequent connect consulting it).
             session_manager.set_fingerprint_store(fingerprint_state.store.clone());
             let local_shell_manager = Arc::new(LocalShellManager::new());
-            let tunnel_manager = Arc::new(tunnel::TunnelManager::new());
-            let session_logger = Arc::new(logging::SessionLogger::new(database.clone()));
-
-            // Backend lifecycle closure: every teardown path in SessionManager
-            // (kill, kill_all, delete_server via kill_by_server_id, reaper)
-            // also stops the dying session's tunnels and recording, which only
-            // the frontend used to remember.
-            session_manager.set_tunnel_manager(tunnel_manager.clone());
-            session_manager.set_session_logger(session_logger.clone());
 
             // Session reaper: only the CLI IPC loop called
             // reap_inactive_sessions and that loop never runs in the GUI, so
@@ -281,7 +218,6 @@ pub fn run() {
             let _ = session_manager
                 .local_shell_manager
                 .set(local_shell_manager.clone());
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if primary_install {
                 // Share GUI-owned sessions with the native CLI. If a daemon
                 // already owns IPC, keep its live sessions and attach to it;
@@ -304,68 +240,62 @@ pub fn run() {
                     });
                 }
             }
-            let cloud_sync_manager = Arc::new(CloudSyncManager::new(database.clone())?);
             let agent_input_tracker = session_manager.agent_input_tracker.clone();
 
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            {
-                let activity_handle = app.handle().clone();
-                let activity_emitter = Arc::new(move |event| {
-                    let _ = activity_handle.emit("agent-gateway-activity", event);
-                });
+            let activity_handle = app.handle().clone();
+            let activity_emitter = Arc::new(move |event| {
+                let _ = activity_handle.emit("agent-gateway-activity", event);
+            });
 
-                let terminal_handle = app.handle().clone();
-                let terminal_input_emitter = Arc::new(move |event| {
-                    let _ = terminal_handle.emit("agent-terminal-input", event);
-                });
+            let terminal_handle = app.handle().clone();
+            let terminal_input_emitter = Arc::new(move |event| {
+                let _ = terminal_handle.emit("agent-terminal-input", event);
+            });
 
-                let persisted_auto_approve_until = database
-                    .get_setting(mcp::approval::AUTO_APPROVE_UNTIL_KEY)?
-                    .and_then(|value| value.parse::<i64>().ok());
-                let approval_handle = app.handle().clone();
-                let approval_manager =
-                    Arc::new(mcp::AgentApprovalManager::with_auto_approve_until(
-                        Arc::new(move |event| match event {
-                            mcp::ApprovalEvent::Request(request) => {
-                                let _ = approval_handle.emit("agent-approval-request", request);
-                            }
-                            mcp::ApprovalEvent::Resolved(resolved) => {
-                                let _ = approval_handle.emit("agent-approval-resolved", resolved);
-                            }
-                            mcp::ApprovalEvent::State(state) => {
-                                let _ = approval_handle.emit("agent-approval-state", state);
-                            }
-                        }),
-                        persisted_auto_approve_until,
-                    ));
+            let persisted_auto_approve_until = database
+                .get_setting(mcp::approval::AUTO_APPROVE_UNTIL_KEY)?
+                .and_then(|value| value.parse::<i64>().ok());
+            let approval_handle = app.handle().clone();
+            let approval_manager = Arc::new(mcp::AgentApprovalManager::with_auto_approve_until(
+                Arc::new(move |event| match event {
+                    mcp::ApprovalEvent::Request(request) => {
+                        let _ = approval_handle.emit("agent-approval-request", request);
+                    }
+                    mcp::ApprovalEvent::Resolved(resolved) => {
+                        let _ = approval_handle.emit("agent-approval-resolved", resolved);
+                    }
+                    mcp::ApprovalEvent::State(state) => {
+                        let _ = approval_handle.emit("agent-approval-state", state);
+                    }
+                }),
+                persisted_auto_approve_until,
+            ));
 
-                let gateway = if primary_install {
-                    AgentGateway::start(
-                        database.clone(),
-                        session_manager.clone(),
-                        activity_emitter,
-                        terminal_input_emitter,
-                        approval_manager.clone(),
-                        agent_input_tracker.clone(),
-                    )
-                } else {
-                    // Alternate bundle identifiers must not replace the normal
-                    // application's CLI/agent discovery manifest during UI QA.
-                    AgentGateway::start_at_path(
-                        database.clone(),
-                        session_manager.clone(),
-                        activity_emitter,
-                        terminal_input_emitter,
-                        approval_manager.clone(),
-                        agent_input_tracker.clone(),
-                        app_data_dir.join("agent-gateway.json"),
-                    )
-                }?;
-                app.manage(gateway);
-                app.manage(approval_manager);
-            }
+            let gateway = if primary_install {
+                AgentGateway::start(
+                    database.clone(),
+                    session_manager.clone(),
+                    activity_emitter,
+                    terminal_input_emitter,
+                    approval_manager.clone(),
+                    agent_input_tracker.clone(),
+                )
+            } else {
+                // Alternate bundle identifiers must not replace the normal
+                // application's CLI/agent discovery manifest during UI QA.
+                AgentGateway::start_at_path(
+                    database.clone(),
+                    session_manager.clone(),
+                    activity_emitter,
+                    terminal_input_emitter,
+                    approval_manager.clone(),
+                    agent_input_tracker.clone(),
+                    app_data_dir.join("agent-gateway.json"),
+                )
+            }?;
+            app.manage(gateway);
+            app.manage(approval_manager);
 
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if std::env::var_os("ZXYSSH_SKIP_SKILL_AUTO_INSTALL").is_none() {
                 std::thread::spawn(|| {
                     if let Err(error) = crate::install::install_bundled_cli_for_user() {
@@ -389,10 +319,7 @@ pub fn run() {
             app.manage(sftp_state);
             app.manage(fingerprint_state);
             app.manage(local_shell_manager);
-            app.manage(tunnel_manager);
-            app.manage(session_logger);
             app.manage(session_access_state);
-            app.manage(cloud_sync_manager);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -413,36 +340,12 @@ pub fn run() {
             set_agent_guard_config,
             // LAN Agent pairing: code, approval queue, credential management
             mcp_pair_code_create,
-            mcp_pair_requests_list,
-            mcp_pair_request_approve,
-            mcp_pair_request_reject,
-            mcp_pairing_approval_get,
-            mcp_pairing_approval_set,
             mcp_agents_list,
             mcp_agent_revoke,
             mcp_agent_rename,
             mcp_agent_rotate,
             mcp_lan_status,
             // End-to-end encrypted cloud sync
-            cloud_sync_create_vault,
-            cloud_sync_export_file,
-            cloud_sync_import_file,
-            cloud_sync_join_vault,
-            cloud_sync_lock,
-            cloud_sync_status,
-            cloud_sync_now,
-            // Coding agents launched inside zxySSH PTYs
-            db_connection_list,
-            db_connection_save,
-            db_connection_delete,
-            db_connection_test,
-            db_connection_probe,
-            db_connection_databases,
-            db_connection_tables,
-            db_connection_columns,
-            db_connection_query,
-            db_session_detect,
-            // Plugin marketplace commands
             // Session commands
             session_list,
             session_create,
@@ -528,16 +431,6 @@ pub fn run() {
             local_shell_detach,
             local_shell_kill,
             local_shell_kill_all,
-            // Snippet commands
-            // Command history commands
-            // Tunnel commands
-            // Recording/logging commands
-            start_recording,
-            stop_recording,
-            list_recordings,
-            is_session_recording,
-            get_session_recording_id,
-            delete_recording,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -554,7 +447,6 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
             }
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } = event

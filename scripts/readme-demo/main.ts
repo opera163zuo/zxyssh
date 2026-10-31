@@ -63,12 +63,10 @@ const activity = [
 
 const settings = {
   terminal: { fontSize: 15, fontFamily: 'Monaco', cursorStyle: 'bar', cursorBlink: false, scrollbackLines: 10000 },
-  appearance: { theme: light ? 'paper-white' : 'violet-black', themeMode: 'manual', lightTheme: 'paper-white', darkTheme: 'violet-black', windowOpacity: 1 },
-  sshDefaults: { defaultPort: 22, connectionTimeout: 30, keepaliveInterval: 60, defaultUsername: 'demo' },
-  aiPrediction: { enabled: false, provider: 'openai', apiKey: '', baseUrl: 'https://api.example.test/v1', model: '', debounceMs: 450, maxTokens: 32, minChars: 2 },
+  appearance: { theme: light ? 'paper-white' : 'violet-black', themeMode: 'manual', lightTheme: 'paper-white', darkTheme: 'violet-black' },
 };
 const capabilities = { platform: 'macos', isMobile: false, windowControls: false, localShell: true,
-  agentGateway: true, desktopUpdater: false, cliIpc: true, directoryTransfer: true, backgroundTunnels: true };
+  agentGateway: true, desktopUpdater: false, directoryTransfer: true };
 const active = scenario === 'coding' ? 'demo-session-agent' : 'demo-session-api';
 const fileTab = { id: `demo-session-api\u0000${root}/RUNBOOK.md`, sessionId: 'demo-session-api',
   path: `${root}/RUNBOOK.md`, name: 'RUNBOOK.md', kind: 'text', size: markdown.length, dirty: false };
@@ -138,7 +136,6 @@ mockIPC(async (cmd, payload) => {
     case 'plugin:window|get_all_windows': return ['main'];
     case 'plugin:window|available_monitors': return [{ name: 'Demo display', position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1, workArea: { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } } }];
     case 'plugin:window|set_position': case 'plugin:window|set_size': return null;
-    case 'cloud_sync_status': return { unlocked: false, syncing: false, provider: null, endpoint: null, vaultId: null, pendingChanges: 0, conflicts: 0, lastSuccessAt: null, lastError: null };
     case 'agent_activity_list': return activity.filter(item => (!args.after || item.sequence > args.after) && (!args.before || item.sequence < args.before));
     case 'get_agent_guard_status': return { autoApproveUntil: null, pending: [] };
     case 'resolve_agent_approval': await emit('agent-approval-resolved', { id: request.id }); return null;
@@ -174,7 +171,7 @@ mockIPC(async (cmd, payload) => {
     }
     case 'sftp_write_file': if (request.path in files) { files[request.path] = request.content; return null; } break;
     case 'get_credential': return null;
-    case 'list_fingerprints': case 'list_recordings': case 'tunnel_config_list': case 'tunnel_list_active': return [];
+    case 'list_fingerprints': case 'list_recordings': return [];
     case 'is_session_recording': return false;
     case 'get_session_recording_id': return null;
     case 'history_list': return [];

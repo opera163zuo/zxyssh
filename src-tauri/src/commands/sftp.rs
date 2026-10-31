@@ -221,14 +221,6 @@ impl Default for SftpState {
     }
 }
 
-fn ensure_native_path_transfer_supported() -> Result<(), String> {
-    if cfg!(any(target_os = "android", target_os = "ios")) {
-        Err("Path-based file transfer is unavailable on mobile until native document pickers are implemented".to_string())
-    } else {
-        Ok(())
-    }
-}
-
 /// SFTP entry returned to the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -955,8 +947,6 @@ pub async fn sftp_download_file(
     access_state: State<'_, Arc<SessionAccessState>>,
     request: SftpDownloadRequest,
 ) -> Result<TransferProgress, String> {
-    ensure_native_path_transfer_supported()?;
-
     if is_local_session(local_shell_manager.inner(), &request.session_id).await {
         let current_path = get_local_current_path(sftp_state.inner(), &request.session_id).await;
         let source_path = resolve_local_path(&request.remote_path, &current_path)?;
@@ -1062,8 +1052,6 @@ pub async fn sftp_upload_file(
     access_state: State<'_, Arc<SessionAccessState>>,
     request: SftpUploadRequest,
 ) -> Result<TransferProgress, String> {
-    ensure_native_path_transfer_supported()?;
-
     if is_local_session(local_shell_manager.inner(), &request.session_id).await {
         let current_path = get_local_current_path(sftp_state.inner(), &request.session_id).await;
         let source_path = resolve_local_path(&request.local_path, &current_path)?;
@@ -1181,8 +1169,6 @@ pub async fn sftp_upload_directory(
     access_state: State<'_, Arc<SessionAccessState>>,
     request: SftpUploadDirectoryRequest,
 ) -> Result<DirectoryTransferSummary, String> {
-    ensure_native_path_transfer_supported()?;
-
     let mode = request.mode.unwrap_or(DirectoryTransferMode::Upload);
     let options = effective_directory_transfer_options(
         request.excluded_paths.clone(),
@@ -1767,16 +1753,6 @@ pub async fn sftp_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn native_path_transfer_support_matches_the_target() {
-        let result = ensure_native_path_transfer_supported();
-        if cfg!(any(target_os = "android", target_os = "ios")) {
-            assert!(result.is_err());
-        } else {
-            assert!(result.is_ok());
-        }
-    }
 
     #[test]
     fn test_shell_escape() {

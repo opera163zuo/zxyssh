@@ -22,12 +22,9 @@ pub struct LanListenerStatus {
     /// Credentials are sealed to an ephemeral Agent key rather than returned in
     /// the clear.
     pub credential_sealing: bool,
-    /// Operator switch for the approval queue.
-    pub approval_required: bool,
     pub pid: u32,
     pub started_at: i64,
     pub active_agents: usize,
-    pub pending_requests: usize,
 }
 
 pub fn lan_status_path() -> Result<PathBuf> {
@@ -102,11 +99,9 @@ mod tests {
             bind: "192.168.0.96:8765".to_string(),
             allow_lan: true,
             credential_sealing: true,
-            approval_required: true,
             pid: 4242,
             started_at: 1_800_000_000,
             active_agents: 2,
-            pending_requests: 1,
         };
         let text = serde_json::to_string(&status).unwrap();
         let back: LanListenerStatus = serde_json::from_str(&text).unwrap();

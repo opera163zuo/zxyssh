@@ -4,7 +4,6 @@ import { cn } from '../../lib/utils';
 import { useServerStore } from '../../stores/serverStore';
 import { safeInvoke } from '../../lib/tauri';
 import { useNotificationStore } from '../../stores/notificationStore';
-import { useRuntimeCapabilitiesStore } from '../../stores/runtimeCapabilitiesStore';
 import { useSshKeyPicker, getFileName } from '../../hooks/useSshKeyPicker';
 
 interface AddServerDialogProps {
@@ -32,7 +31,6 @@ const INITIAL_FORM_DATA = {
 export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
   const { addServer, updateServer, loading, error, clearError } = useServerStore();
   const { success: notifySuccess } = useNotificationStore();
-  const isMobile = useRuntimeCapabilitiesStore((state) => state.capabilities.isMobile);
 
   const { servers } = useServerStore();
 
@@ -49,7 +47,6 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
     keyContent,
     isLoadingKey,
     browseForSshKey,
-    setKeyContent,
     reset: resetKeyPicker,
   } = useSshKeyPicker({
     onBrowseStart: () => setLocalError(null),
@@ -92,7 +89,7 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
     const isKeyAuth = formData.authType === 'key_with_passphrase';
 
     if (isKeyAuth && !keyContent) {
-      setLocalError(isMobile ? 'Please paste an SSH private key' : 'Please select an SSH private key file');
+      setLocalError('Please select an SSH private key file');
       return;
     }
 
@@ -119,7 +116,6 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
 
       // Credentials entered during server creation are saved automatically on
       // desktop so the next connection does not ask for them again.
-      if (!isMobile) {
         const credentialResult = await safeInvoke<string>('save_credential', {
           request: {
             serverName: createdServer.name,
@@ -137,9 +133,8 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
         } else {
           console.warn('Failed to save credentials, will prompt on connect:', credentialResult.error.message);
         }
-      }
 
-      if (!isMobile && formData.sudoPassword) {
+      if (formData.sudoPassword) {
         const sudoResult = await safeInvoke<void>('save_sudo_credential', {
           request: { serverName: createdServer.name, password: formData.sudoPassword },
         });
@@ -166,7 +161,7 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
     } catch (err) {
       console.error('Failed to add server:', err);
     }
-  }, [formData, keyPath, keyContent, isMobile, addServer, updateServer, notifySuccess, onClose, resetKeyPicker]);
+  }, [formData, keyPath, keyContent, addServer, updateServer, notifySuccess, onClose, resetKeyPicker]);
 
   const handleChange = useCallback((field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -369,7 +364,6 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
             )}
 
             {/* Server-side sudo credential */}
-            {!isMobile && (
               <div>
                 <label className="block text-sm font-medium text-tokyo-fg mb-1">
                   Sudo password <span className="text-tokyo-comment font-normal">(optional, stored only by the backend)</span>
@@ -397,9 +391,7 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
                   </button>
                 </div>
               </div>
-            )}
 
-            {!isMobile && (
               <div>
                 <label className="block text-sm font-medium text-tokyo-fg mb-1">Allowed sudo commands</label>
                 <textarea
@@ -416,37 +408,10 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
                 />
                 <p className="mt-1 text-xs text-tokyo-comment">Sudo is refused unless the requested command exactly matches this list.</p>
               </div>
-            )}
 
             {/* Key Auth */}
             {isKeyAuth && (
               <>
-                {isMobile ? (
-                  <div>
-                    <label htmlFor="mobilePrivateKey" className="block text-sm font-medium text-tokyo-fg mb-1">
-                      Private Key
-                    </label>
-                    <textarea
-                      id="mobilePrivateKey"
-                      value={keyContent ?? ''}
-                      onChange={(event) => {
-                        setKeyContent(event.target.value || null);
-                        setLocalError(null);
-                      }}
-                      rows={6}
-                      spellCheck={false}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      placeholder="Paste OpenSSH private key"
-                      className={cn(
-                        'w-full resize-y rounded-md px-3 py-2 font-mono text-sm',
-                        'bg-tokyo-bg border border-tokyo-bg-hl',
-                        'text-tokyo-fg placeholder-tokyo-comment',
-                        'focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue'
-                      )}
-                    />
-                  </div>
-                ) : (
                 <div>
                   <label className="block text-sm font-medium text-tokyo-fg mb-1">
                     Private Key File
@@ -487,7 +452,6 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
                     </p>
                   )}
                 </div>
-                )}
 
                 {formData.authType === 'key_with_passphrase' && (
                   <div>
@@ -521,11 +485,9 @@ export function AddServerDialog({ isOpen, onClose }: AddServerDialogProps) {
               </>
             )}
 
-            {!isMobile && (
               <p className="text-xs text-tokyo-comment">
                 Credentials entered here are saved automatically on this device.
               </p>
-            )}
           </div>
 
           {/* Advanced Section */}

@@ -47,9 +47,6 @@ The approval dialog puts the proposed command and the reasons for review in fron
 
 You should not need AI just to remember a flag. Built-in completion suggests commands, subcommands and options with descriptions, and keeps the answer near the cursor through inline suggestions and a keyboard-driven list.
 
-For an extra nudge, enable **AI command prediction** with your own OpenAI-compatible or Claude endpoint and model. It proposes a suffix to what you are typing; it does not run the suggestion for you. This is separate from the MCP Agent surface.
-
-**Prediction is off by default.** When enabled, the current input and local completion candidates are sent to the provider you configure. Leave it disabled for work that must not leave the machine; ordinary local completion remains available.
 
 Terminal rendering uses xterm.js, a WebGL renderer where available, and batched input/output paths to reduce UI overhead. These are responsiveness choices, not a claim that zxySSH makes the SSH network faster.
 
@@ -104,9 +101,8 @@ Anything beyond that — arbitrary `exec`, remote file search, SFTP upload or do
 
 ## The SSH essentials are still here
 
-Host identity is checked before authentication, including the real destination behind a jump host, and a changed fingerprint stops the connection instead of warning its way through. Session recording can be turned on and its files are listed and deletable from Settings; the current interface does not ship a playback player. Credentials, sudo passwords and agent activity use encrypted local storage. That is not OS Keychain custody or protection from a compromised local account. A correct private key does not justify accepting an unexpected server fingerprint.
+Host identity is checked before authentication, including the real destination behind a jump host, and a changed fingerprint stops the connection instead of warning its way through. Credentials, sudo passwords and agent activity use encrypted local storage. That is not OS Keychain custody or protection from a compromised local account. A correct private key does not justify accepting an unexpected server fingerprint.
 
-Optional encrypted **Gist/WebDAV sync** carries server metadata and groups between your own setups. It is not a zxySSH-hosted SSH relay. Login credentials, host-key trust, live terminal sessions and agent activity history stay outside that sync. Protect provider tokens and recovery material.
 
 ## Linux server and cross-platform agents
 
@@ -119,19 +115,16 @@ The `zxyssh` binary is the service and its administration surface. It runs the l
 ```bash
 zxyssh mcp serve                        # run the listener (systemd Type=simple)
 zxyssh mcp pair-code                    # one-time code for the next Agent
-zxyssh mcp requests list                # pairing requests waiting for approval
-zxyssh mcp requests approve <request-id>
-zxyssh mcp approvals                    # whether pairing waits for approval
 zxyssh mcp agents                       # paired Agents and revocation state
 zxyssh mcp credential set my-server     # read the secret from piped stdin
 zxyssh mcp hostkey probe my-server      # headless TOFU before a connection
 ```
 
-A correct pairing code only opens a request: the credential is issued after an operator approves it in the desktop or with `zxyssh mcp requests approve`, and it comes back sealed to the Agent's ephemeral key, so a pairing request must present `clientPublicKey` while the queue is on. A LAN listener needs a concrete bind address and an explicit opt-in, and refuses to start while no Agent is paired. Never put passwords or private keys in command-line arguments or Agent prompts.
+A correct pairing code is the whole handshake: it returns the credential immediately, with no operator in the loop. A client that offers `clientPublicKey` gets that credential sealed to its ephemeral key and fetches it once from `/pair/status`, so a listener on the same segment cannot read it; a keyless client still receives it in the clear. A LAN listener needs a concrete bind address and an explicit opt-in, and refuses to start while no Agent is paired. Never put passwords or private keys in command-line arguments or Agent prompts.
 
 The desktop and the service share one database when they run as the same user, so sites added in the UI are the sites an Agent can use. The process owning a connection must remain alive: service-owned sessions can outlive the GUI, while GUI-owned ones end when that GUI exits. Upgrade the desktop and CLI together, and save ongoing work before restarting.
 
-Mobile targets remain experimental. Common OpenSSH paths are tested, but not every MFA flow, hardware token or SSH implementation.
+There are no mobile targets: the desktop ships Linux packages only, and the mobile code paths were removed rather than left untested. Common OpenSSH paths are covered by the loopback fixture, but not every MFA flow, hardware token or SSH implementation.
 
 ## Build, contribute, or explore the implementation
 
@@ -150,7 +143,7 @@ Before a PR: `node scripts/check-release.mjs`, `npm test`, `npm run build`, `car
 
 CI builds and releases are **manual-only**. Maintainers run CI on the PR head before merging; pushing code or a version tag does not compile or publish. Release runs from `main` and defaults to a draft unless publication is explicitly selected. Required checks, signatures and complete-source validation remain in place.
 
-Docker inventory improvements and the remaining container-session/proxy work are tracked in the [September issue review](docs/ISSUE_TRIAGE_2026-09.md). A container listing command is not a persistent container session; a SOCKS forwarding listener is not an outbound proxy setting.
+Docker inventory improvements and the remaining container-session/proxy work are tracked in the [September issue review](docs/ISSUE_TRIAGE_2026-09.md). A container listing command is not a persistent container session, and zxySSH no longer forwards ports at all — the SSH tunnel runtime was removed, so outbound proxy support still has to be designed in rather than piggybacked on a forwarding listener.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](AGENTS.md) · [Release process](docs/RELEASING.md) · [Collaboration API](docs/AGENT_COLLABORATION.md)
 

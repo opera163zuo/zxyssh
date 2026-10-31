@@ -193,14 +193,7 @@ pub async fn execute(
                 .map_err(|e| e.to_string())?;
                 return serde_json::to_string(&status).map_err(|e| e.to_string());
             }
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            {
-                return host::run_local_command(&prepared.command, prepared.stdin.as_deref()).await;
-            }
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                return Err("Local plugins are unavailable on mobile".into());
-            }
+            return host::run_local_command(&prepared.command, prepared.stdin.as_deref()).await;
         }
         let session = manager
             .get(&request.session_id)

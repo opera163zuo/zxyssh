@@ -201,12 +201,6 @@ pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Res
             StatusCode::BAD_REQUEST,
             "clientPublicKey must be a base64url-encoded 32-byte X25519 key",
         ),
-        Err(PairingError::ClientKeyRequired) => reject(
-            StatusCode::BAD_REQUEST,
-            "This service approves pairing before issuing credentials, so a pairing request \
-             must include clientPublicKey to receive one sealed. Send it, or turn the queue off \
-             with `zxyssh mcp approvals --set off`.",
-        ),
         Err(PairingError::Storage(_)) => registry_unavailable(),
         Err(_) => reject(StatusCode::UNAUTHORIZED, "Pairing code rejected"),
     }
@@ -275,9 +269,10 @@ pub async fn handle_pair_status(State(state): State<McpState>, request: Request)
 
 fn status_name(status: PairRequestStatus) -> &'static str {
     match status {
-        PairRequestStatus::AwaitingApproval => "awaiting_approval",
+        // The wire name stays `awaiting_approval` so Agents written against 2.1.0
+        // keep parsing it; the state now means "sealing, poll again".
+        PairRequestStatus::AwaitingDelivery => "awaiting_approval",
         PairRequestStatus::Approved => "approved",
-        PairRequestStatus::Rejected => "rejected",
         PairRequestStatus::Delivered => "delivered",
         PairRequestStatus::Expired => "expired",
     }

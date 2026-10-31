@@ -18,28 +18,20 @@ use super::ShellInfo;
 fn build_shell_command(shell_info: &ShellInfo) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(&shell_info.path);
 
-    match shell_info.id.as_str() {
-        "pwsh" | "powershell" => cmd.arg("-NoLogo"),
-        "bash" | "zsh" | "fish" | "sh" | "git-bash" | "msys2-bash" | "cygwin-bash" => {
-            cmd.arg("-l");
-            cmd.arg("-i");
-        }
-        "cmd" | "wsl" => {}
-        _ => {}
+    if matches!(shell_info.id.as_str(), "bash" | "zsh" | "fish" | "sh") {
+        cmd.arg("-l");
+        cmd.arg("-i");
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "zxySSH");
-        cmd.env("SHELL", &shell_info.path);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "zxySSH");
+    cmd.env("SHELL", &shell_info.path);
 
-        if let Some(home) = std::env::var_os("HOME") {
-            let home_path = std::path::PathBuf::from(&home);
-            if home_path.is_dir() {
-                cmd.cwd(home);
-            }
+    if let Some(home) = std::env::var_os("HOME") {
+        let home_path = std::path::PathBuf::from(&home);
+        if home_path.is_dir() {
+            cmd.cwd(home);
         }
     }
 
@@ -542,24 +534,14 @@ mod tests {
         let command = build_shell_command(&shell);
         assert_eq!(command.get_argv(), &["/bin/zsh", "-l", "-i"]);
 
-        #[cfg(not(target_os = "windows"))]
-        {
-            assert_eq!(command.get_env("TERM"), Some(OsStr::new("xterm-256color")));
-            assert_eq!(command.get_env("COLORTERM"), Some(OsStr::new("truecolor")));
-            assert_eq!(command.get_env("TERM_PROGRAM"), Some(OsStr::new("zxySSH")));
-            assert_eq!(command.get_env("SHELL"), Some(OsStr::new("/bin/zsh")));
-        }
+        assert_eq!(command.get_env("TERM"), Some(OsStr::new("xterm-256color")));
+        assert_eq!(command.get_env("COLORTERM"), Some(OsStr::new("truecolor")));
+        assert_eq!(command.get_env("TERM_PROGRAM"), Some(OsStr::new("zxySSH")));
+        assert_eq!(command.get_env("SHELL"), Some(OsStr::new("/bin/zsh")));
     }
 
     #[tokio::test]
     async fn short_lived_process_transitions_to_stopped() {
-        #[cfg(target_os = "windows")]
-        let command = {
-            let mut command = CommandBuilder::new("cmd.exe");
-            command.args(["/C", "exit", "0"]);
-            command
-        };
-        #[cfg(not(target_os = "windows"))]
         let command = {
             let mut command = CommandBuilder::new("/bin/sh");
             command.args(["-c", "exit 0"]);

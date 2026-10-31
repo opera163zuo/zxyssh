@@ -11,15 +11,8 @@ use anyhow::Result;
 
 /// Copy the bundled native CLI to a persistent user command directory.
 ///
-/// Windows installers add the application directory to the user PATH through
-/// NSIS/WiX hooks, so no duplicate copy is needed there. macOS DMGs and Linux
-/// AppImages cannot reliably modify a system PATH during installation; for
-/// those platforms we persist the sidecar at `~/.local/bin/zxyssh`.
-#[cfg(windows)]
-pub fn install_bundled_cli_for_user() -> Result<Option<PathBuf>> {
-    Ok(None)
-}
-
+/// macOS and Linux bundles cannot reliably modify a system PATH during
+/// installation, so the sidecar is persisted at `~/.local/bin/zxyssh`.
 #[cfg(unix)]
 pub fn install_bundled_cli_for_user() -> Result<Option<PathBuf>> {
     let Some(source) = find_bundled_cli()? else {
