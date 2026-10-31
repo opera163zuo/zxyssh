@@ -45,17 +45,12 @@ Feature descriptions in the three READMEs were traced to the actual implementati
 
 | Capability | Implementation |
 | --- | --- |
-| Command completion and optional AI prediction | `src/components/Terminal/useCompletion.ts`, `src/lib/aiCommandPrediction.ts` |
-| Local agent launch modes and project selection | `src/components/CodingAgentLauncher/CodingAgentLauncher.tsx` |
-| Git status and line-by-line review | `src/components/WorkspaceChangesPanel/WorkspaceChangesPanel.tsx` |
+| Command completion | `src/components/Terminal/useCompletion.ts` |
 | Shared-session UI and operation history | `src/stores/sessionStore.ts`, `src/stores/agentActivityStore.ts`, `src/components/AgentActivityPanel/` |
 | Human approvals | `src/components/AgentApprovalDialog/`, `src-tauri/src/mcp/guard.rs` |
-| Quick command output | `src/components/QuickCommandDialog/` |
 | Local/remote file tabs, Markdown and draft preservation | `src/components/FileWorkspace/`, `src/stores/fileWorkspaceStore.ts` |
 | Custom CSS, preview and emergency recovery | `src/lib/customTheme.ts`, `src/components/Settings/CustomThemeEditor.tsx`, `docs/local-files-and-css-themes.md` |
 | SFTP, synchronization integrity and excluded paths | `src/components/SftpPanel/`, `src-tauri/src/sftp/sync.rs` |
-| Declarative plugins and agent-readable interfaces | `plugins/builtin/`, `src-tauri/src/plugins/agent.rs`, `cli/src/commands/plugins.rs` |
-| Forwarding and session recording | `src-tauri/src/tunnel/`, `src-tauri/src/logging/` |
-| Optional vault synchronization | `src/stores/cloudSyncStore.ts`, `src-tauri/src/cloud_sync/` |
+| Declarative plugin catalog | `plugins/builtin/`, `src-tauri/src/plugins/agent.rs` |
 
 Keep this distinction when updating the gallery: **real components, synthetic data, bounded claims**.
