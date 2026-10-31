@@ -174,6 +174,19 @@ pub fn mcp_agents_list(db: State<'_, Arc<Database>>) -> Result<Vec<AgentSummary>
     Ok(registry.list())
 }
 
+/// Whether a pairing code is still armed and unspent. The listener consumes it
+/// in another process, so the desktop asks this instead of assuming the code it
+/// minted is still good — that is how the UI notices a pairing that just
+/// happened and can show the new Agent right away.
+#[tauri::command]
+pub fn mcp_pair_code_pending(db: State<'_, Arc<Database>>) -> Result<bool, String> {
+    let registry = registry(&db)?;
+    let now = chrono::Utc::now().timestamp();
+    Ok(registry
+        .pending_expires_at()
+        .is_some_and(|expires_at| expires_at > now))
+}
+
 #[tauri::command]
 pub fn mcp_agent_revoke(db: State<'_, Arc<Database>>, agent_id: String) -> Result<bool, String> {
     let mut registry = registry(&db)?;

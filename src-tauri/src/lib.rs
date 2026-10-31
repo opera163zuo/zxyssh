@@ -35,7 +35,6 @@ use commands::{
     delete_fingerprint_by_id,
     delete_group,
     delete_server,
-    detect_ai_tools,
     get_agent_guard_config,
     get_agent_guard_status,
     get_app_version,
@@ -45,7 +44,6 @@ use commands::{
     get_runtime_capabilities,
     get_server_status,
     get_servers,
-    install_to_tool,
     list_fingerprints,
     load_settings,
     local_shell_attach,
@@ -67,6 +65,7 @@ use commands::{
     mcp_agents_list,
     mcp_lan_status,
     mcp_pair_code_create,
+    mcp_pair_code_pending,
     open_external_url,
     pick_directory_for_upload,
     pick_download_directory,
@@ -110,7 +109,6 @@ use commands::{
     sftp_upload_directory,
     sftp_upload_file,
     sftp_write_file,
-    uninstall_from_tool,
     update_server,
     verify_fingerprint,
     FingerprintState,
@@ -338,14 +336,14 @@ pub fn run() {
             get_agent_guard_status,
             resolve_agent_approval,
             set_agent_guard_config,
-            // LAN Agent pairing: code, approval queue, credential management
+            // LAN Agent pairing: one-step code, credential management
             mcp_pair_code_create,
+            mcp_pair_code_pending,
             mcp_agents_list,
             mcp_agent_revoke,
             mcp_agent_rename,
             mcp_agent_rotate,
             mcp_lan_status,
-            // End-to-end encrypted cloud sync
             // Session commands
             session_list,
             session_create,
@@ -362,10 +360,6 @@ pub fn run() {
             // Settings persistence (SQLite settings table)
             load_settings,
             save_settings,
-            // AI tool installation commands
-            detect_ai_tools,
-            install_to_tool,
-            uninstall_from_tool,
             // Server management commands
             get_servers,
             add_server,

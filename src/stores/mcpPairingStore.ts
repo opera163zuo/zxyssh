@@ -27,10 +27,13 @@ interface PairingState {
   lanStatus: LanListenerStatus | null;
   /** A replacement credential is shown once, then dropped from memory. */
   issuedToken: string | null;
+  /** Set when a code the panel was showing was spent by an Agent. */
+  pairedJustNow: string | null;
   busy: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   createCode: () => Promise<void>;
+  checkCode: () => Promise<void>;
   revoke: (agentId: string) => Promise<void>;
   rename: (agentId: string, name: string) => Promise<void>;
   rotate: (agentId: string) => Promise<void>;
@@ -78,6 +81,7 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
     agents: [],
     lanStatus: null,
     issuedToken: null,
+    pairedJustNow: null,
     busy: false,
     error: null,
 
@@ -100,10 +104,30 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
           set({ error: result.error.message });
           return;
         }
-        set({ code: result.data, error: null });
+        set({ code: result.data, pairedJustNow: null, error: null });
       } finally {
         set({ busy: false });
       }
+    },
+
+    /**
+     * Ask the registry whether the displayed code is still unspent. The
+     * listener spends it in another process, so this is the only way the panel
+     * learns a pairing just succeeded; on the first no it drops the code and
+     * names the Agent that arrived.
+     */
+    checkCode: async () => {
+      if (get().busy || get().code === null) return;
+      const pending = await safeInvoke<boolean>('mcp_pair_code_pending');
+      if (!pending.success) {
+        set({ error: pending.error.message });
+        return;
+      }
+      if (pending.data) return;
+      const known = new Set(get().agents.map((agent) => agent.id));
+      await load();
+      const arrived = get().agents.find((agent) => !known.has(agent.id) && !agent.revoked);
+      set({ code: null, pairedJustNow: arrived?.name ?? null });
     },
 
     revoke: async (agentId) => {
