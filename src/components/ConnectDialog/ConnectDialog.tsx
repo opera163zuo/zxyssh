@@ -4,7 +4,6 @@ import { cn } from '../../lib/utils';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useServerStore, type Server } from '../../stores/serverStore';
 import { safeInvoke } from '../../lib/tauri';
-import { useRuntimeCapabilitiesStore } from '../../stores/runtimeCapabilitiesStore';
 import { useSshKeyPicker, getFileName } from '../../hooks/useSshKeyPicker';
 
 interface ConnectDialogProps {
@@ -29,7 +28,6 @@ function JumpHostBadge({ jumpHostId }: { jumpHostId: string }) {
 
 export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onConnected }: ConnectDialogProps) {
   const { connectWithCredentials, connectWithSavedCredentials } = useSessionStore();
-  const isMobile = useRuntimeCapabilitiesStore((state) => state.capabilities.isMobile);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -41,7 +39,6 @@ export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onCon
     keyContent,
     isLoadingKey,
     browseForSshKey,
-    setKeyContent,
     setKey,
     reset: resetKeyPicker,
   } = useSshKeyPicker({
@@ -87,7 +84,7 @@ export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onCon
 
     // Validate inputs
     if (isKeyAuth && !keyContent) {
-      setError(isMobile ? 'Please paste an SSH private key' : 'Please select an SSH private key file');
+      setError('Please select an SSH private key file');
       return;
     }
 
@@ -125,7 +122,7 @@ export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onCon
     } finally {
       setIsConnecting(false);
     }
-  }, [server, password, keyContent, isMobile, connectWithCredentials, connectWithSavedCredentials, usingSavedCredentials, forceNew, onConnected, onClose]);
+  }, [server, password, keyContent, connectWithCredentials, connectWithSavedCredentials, usingSavedCredentials, forceNew, onConnected, onClose]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const isKeyAuth = server?.auth_type === 'key' || server?.auth_type === 'key_with_passphrase';
@@ -211,33 +208,6 @@ export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onCon
           {/* SSH Key File Browser (for key auth) */}
           {isKeyAuth && (
             <div>
-              {isMobile ? (
-                <>
-                  <label htmlFor="mobileConnectionPrivateKey" className="block text-sm font-medium text-tokyo-fg mb-1">
-                    SSH Private Key
-                  </label>
-                  <textarea
-                    id="mobileConnectionPrivateKey"
-                    value={keyContent ?? ''}
-                    onChange={(event) => {
-                      setKeyContent(event.target.value || null);
-                      setError(null);
-                      setUsingSavedCredentials(false);
-                    }}
-                    rows={6}
-                    spellCheck={false}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    placeholder="Paste OpenSSH private key"
-                    className={cn(
-                      'w-full resize-y rounded-md px-3 py-2 font-mono text-sm',
-                      'bg-tokyo-bg border border-tokyo-bg-hl',
-                      'text-tokyo-fg placeholder-tokyo-comment',
-                      'focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue'
-                    )}
-                  />
-                </>
-              ) : (
                 <>
                   <label className="block text-sm font-medium text-tokyo-fg mb-1">
                     SSH Private Key File
@@ -278,7 +248,6 @@ export function ConnectDialog({ isOpen, server, forceNew = false, onClose, onCon
                     </p>
                   )}
                 </>
-              )}
             </div>
           )}
 

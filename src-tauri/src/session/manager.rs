@@ -93,12 +93,6 @@ pub struct SessionManager {
     pub(crate) local_shell_manager: std::sync::OnceLock<Arc<crate::local_shell::LocalShellManager>>,
     sessions: Arc<RwLock<HashMap<String, Arc<Session>>>>,
     database: Arc<Database>,
-    /// Optional collaborators for backend lifecycle closure: every session
-    /// teardown path (session_kill, session_kill_all, delete_server, idle
-    /// reaper) routes through kill()/kill_all(), so tunnels and recordings
-    /// are stopped there too. Injected once from lib.rs setup.
-    tunnel_manager: std::sync::OnceLock<Arc<crate::tunnel::TunnelManager>>,
-    session_logger: std::sync::OnceLock<Arc<crate::logging::SessionLogger>>,
     /// SSH host-key (TOFU) verification store. Injected from lib.rs so the
     /// manager shares one instance with the fingerprint UI commands; headless
     /// entry points (CLI daemon) fall back to a lazily-created default store.
@@ -112,8 +106,6 @@ impl SessionManager {
             agent_input_tracker: Arc::new(crate::mcp::SharedAgentInputTracker::default()),
             local_shell_manager: std::sync::OnceLock::new(),
             database,
-            tunnel_manager: std::sync::OnceLock::new(),
-            session_logger: std::sync::OnceLock::new(),
             fingerprint_store: std::sync::OnceLock::new(),
         }
     }
@@ -145,36 +137,6 @@ impl SessionManager {
             host.to_string(),
             port,
         ))
-    }
-
-    /// Register the tunnel manager so killing a session also stops its tunnels.
-    pub fn set_tunnel_manager(&self, tunnel_manager: Arc<crate::tunnel::TunnelManager>) {
-        let _ = self.tunnel_manager.set(tunnel_manager);
-    }
-
-    /// Register the session logger so killing a session also stops (and
-    /// flushes) its recording.
-    pub fn set_session_logger(&self, session_logger: Arc<crate::logging::SessionLogger>) {
-        let _ = self.session_logger.set(session_logger);
-    }
-
-    pub(crate) fn tunnel_service(&self) -> Option<Arc<crate::tunnel::TunnelManager>> {
-        self.tunnel_manager.get().cloned()
-    }
-
-    pub(crate) fn recording_service(&self) -> Option<Arc<crate::logging::SessionLogger>> {
-        self.session_logger.get().cloned()
-    }
-
-    /// Stop tunnels and recording for a dying session, if collaborators were
-    /// injected. Best-effort: session teardown must not fail because of them.
-    async fn run_lifecycle_cleanup(&self, session_id: &str) {
-        if let Some(tunnel_manager) = self.tunnel_manager.get() {
-            tunnel_manager.stop_all_for_session(session_id).await;
-        }
-        if let Some(session_logger) = self.session_logger.get() {
-            session_logger.stop_for_session(session_id).await;
-        }
     }
 
     pub async fn list(&self) -> Vec<SessionInfo> {
@@ -795,10 +757,6 @@ impl SessionManager {
         info!("[SessionManager] Killing session {}", id);
         let session = self.sessions.write().await.remove(id);
         if let Some(session) = session {
-            // Backend lifecycle closure: stop tunnels and recording that only
-            // the frontend used to remember. Runs for every teardown path
-            // (session_kill, session_kill_all, delete_server, reaper).
-            self.run_lifecycle_cleanup(id).await;
             // Disconnect SSH gracefully
             if let Err(e) = session.disconnect().await {
                 error!("[SessionManager] Error disconnecting session {}: {}", id, e);
@@ -813,12 +771,11 @@ impl SessionManager {
 
     pub async fn kill_all(&self) -> Result<()> {
         info!("[SessionManager] Killing all sessions");
-        // Move ownership out before awaiting cleanup. Other sessions must
+        // Move ownership out before awaiting teardown. Other sessions must
         // remain accessible while a slow peer is disconnecting.
         let sessions = std::mem::take(&mut *self.sessions.write().await);
         let count = sessions.len();
         for (id, session) in &sessions {
-            self.run_lifecycle_cleanup(id).await;
             if let Err(e) = session.disconnect().await {
                 error!("[SessionManager] Error disconnecting session {}: {}", id, e);
             }

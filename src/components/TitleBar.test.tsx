@@ -24,14 +24,11 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 const macosCapabilities = {
   platform: 'macos',
-  isMobile: false,
   windowControls: true,
   localShell: true,
   agentGateway: true,
   desktopUpdater: true,
-  cliIpc: true,
   directoryTransfer: true,
-  backgroundTunnels: true,
 } as const;
 
 describe('TitleBar window controls', () => {
@@ -104,29 +101,4 @@ describe('TitleBar window controls', () => {
       .toBeLessThan(windowApi.close.mock.invocationCallOrder[0]);
   });
 
-  it('uses backend capabilities instead of a desktop user agent on mobile', async () => {
-    useRuntimeCapabilitiesStore.setState({
-      capabilities: {
-        ...macosCapabilities,
-        platform: 'android',
-        isMobile: true,
-        windowControls: false,
-        localShell: false,
-        agentGateway: false,
-        desktopUpdater: false,
-        cliIpc: false,
-        directoryTransfer: false,
-        backgroundTunnels: false,
-      },
-      status: 'ready',
-    });
-
-    render(<TitleBar />);
-    await Promise.resolve();
-
-    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Minimize')).not.toBeInTheDocument();
-    expect(getCurrentWindowMock).not.toHaveBeenCalled();
-    expect(listenMock).not.toHaveBeenCalled();
-  });
 });

@@ -1,10 +1,5 @@
 import { create } from 'zustand';
 import { invokeOrThrow } from '../lib/tauri';
-import {
-  defaultAiPredictionSettings,
-  normalizeAiPredictionSettings,
-  type AiPredictionSettings,
-} from '../lib/aiCommandPrediction';
 
 // ============================================================================
 // Types
@@ -81,22 +76,6 @@ export interface AppearanceSettings {
   lightTheme: ThemeName;
   /** Theme used when the OS is in dark mode. */
   darkTheme: ThemeName;
-  /** Window opacity (0.5-1.0, Windows only) */
-  windowOpacity: number;
-}
-
-/**
- * SSH connection default settings.
- */
-export interface SshDefaultSettings {
-  /** Default SSH port */
-  defaultPort: number;
-  /** Connection timeout in seconds */
-  connectionTimeout: number;
-  /** Keepalive interval in seconds (0 to disable) */
-  keepaliveInterval: number;
-  /** Default username for new connections */
-  defaultUsername: string;
 }
 
 /**
@@ -115,8 +94,6 @@ export interface UploadIgnoreConfig {
 export interface AppSettings {
   terminal: TerminalSettings;
   appearance: AppearanceSettings;
-  sshDefaults: SshDefaultSettings;
-  aiPrediction: AiPredictionSettings;
 }
 
 /**
@@ -135,15 +112,7 @@ export const defaultSettings: AppSettings = {
     themeMode: 'manual',
     lightTheme: 'paper-white',
     darkTheme: 'violet-black',
-    windowOpacity: 1.0,
   },
-  sshDefaults: {
-    defaultPort: 22,
-    connectionTimeout: 30,
-    keepaliveInterval: 60,
-    defaultUsername: '',
-  },
-  aiPrediction: { ...defaultAiPredictionSettings },
 };
 
 export const defaultUploadIgnoreConfig: UploadIgnoreConfig = {
@@ -222,10 +191,6 @@ interface SettingsStore {
   updateTerminalSettings: (settings: Partial<TerminalSettings>) => Promise<void>;
   /** Update appearance settings */
   updateAppearanceSettings: (settings: Partial<AppearanceSettings>) => Promise<void>;
-  /** Update SSH default settings */
-  updateSshDefaultSettings: (settings: Partial<SshDefaultSettings>) => Promise<void>;
-  /** Update AI command prediction settings */
-  updateAiPredictionSettings: (settings: Partial<AiPredictionSettings>) => Promise<void>;
   /** Update global recursive upload ignore config */
   updateUploadIgnoreConfig: (config: Partial<UploadIgnoreConfig>) => Promise<void>;
   /** Reset all settings to defaults */
@@ -269,11 +234,8 @@ function normalizeAppearanceSettings(value: unknown): AppearanceSettings {
     ? defaultSettings.appearance.darkTheme
     : theme);
   const themeMode: ThemeMode = raw.themeMode === 'system' ? 'system' : 'manual';
-  const opacity = typeof raw.windowOpacity === 'number' && Number.isFinite(raw.windowOpacity)
-    ? Math.min(1, Math.max(0.5, raw.windowOpacity))
-    : defaultSettings.appearance.windowOpacity;
 
-  return { theme, themeMode, lightTheme, darkTheme, windowOpacity: opacity };
+  return { theme, themeMode, lightTheme, darkTheme };
 }
 
 /**
@@ -288,8 +250,6 @@ function loadSettingsFromStorage(): AppSettings {
       return {
         terminal: { ...defaultSettings.terminal, ...parsed.terminal },
         appearance: normalizeAppearanceSettings(parsed.appearance),
-        sshDefaults: { ...defaultSettings.sshDefaults, ...parsed.sshDefaults },
-        aiPrediction: normalizeAiPredictionSettings(parsed.aiPrediction),
       };
     }
   } catch (error) {
@@ -320,8 +280,6 @@ async function loadSettings(): Promise<AppSettings> {
       return {
         terminal: { ...defaultSettings.terminal, ...settings.terminal },
         appearance: normalizeAppearanceSettings(settings.appearance),
-        sshDefaults: { ...defaultSettings.sshDefaults, ...settings.sshDefaults },
-        aiPrediction: normalizeAiPredictionSettings(settings.aiPrediction),
       };
     }
   } catch (error) {
@@ -499,34 +457,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         ...currentSettings.appearance,
         ...appearanceUpdates,
       },
-    };
-
-    set({ settings: newSettings });
-    await saveSettings(newSettings);
-  },
-
-  updateSshDefaultSettings: async (sshUpdates: Partial<SshDefaultSettings>) => {
-    const currentSettings = get().settings;
-    const newSettings: AppSettings = {
-      ...currentSettings,
-      sshDefaults: {
-        ...currentSettings.sshDefaults,
-        ...sshUpdates,
-      },
-    };
-
-    set({ settings: newSettings });
-    await saveSettings(newSettings);
-  },
-
-  updateAiPredictionSettings: async (aiPredictionUpdates: Partial<AiPredictionSettings>) => {
-    const currentSettings = get().settings;
-    const newSettings: AppSettings = {
-      ...currentSettings,
-      aiPrediction: normalizeAiPredictionSettings({
-        ...currentSettings.aiPrediction,
-        ...aiPredictionUpdates,
-      }),
     };
 
     set({ settings: newSettings });

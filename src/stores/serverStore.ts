@@ -3,7 +3,6 @@ import { useMemo } from 'react';
 import { safeInvoke, TauriError } from '../lib/tauri';
 import { useNotificationStore } from './notificationStore';
 import { useSessionStore } from './sessionStore';
-import { scheduleCloudSync } from './cloudSyncStore';
 
 /**
  * Helper to show error notification
@@ -149,7 +148,6 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         servers: [...state.servers, result.data],
         loading: false,
       }));
-      scheduleCloudSync();
       return result.data;
     } else {
       set({ error: result.error.message, loading: false });
@@ -173,7 +171,6 @@ export const useServerStore = create<ServerStore>((set, get) => ({
       // Re-fetch from the backend so the local cache mirrors the database
       // exactly (server-side timestamps, credential migrations, etc.).
       await get().fetchServers();
-      scheduleCloudSync();
     } else {
       set({ error: result.error.message, loading: false });
       showError('Failed to Update Server', result.error);
@@ -194,7 +191,6 @@ export const useServerStore = create<ServerStore>((set, get) => ({
       // session store so closed tabs disappear immediately instead of waiting
       // for the next poll.
       void useSessionStore.getState().syncRemoteSessions();
-      scheduleCloudSync();
     } else {
       set({ error: result.error.message, loading: false });
       showError('Failed to Delete Server', result.error);
@@ -232,7 +228,6 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         groups: [...state.groups, result.data],
         loading: false,
       }));
-      scheduleCloudSync();
       return result.data;
     } else {
       set({ error: result.error.message, loading: false });
@@ -253,7 +248,6 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         ),
         loading: false,
       }));
-      scheduleCloudSync();
     } else {
       set({ error: result.error.message, loading: false });
       showError('Failed to Delete Group', result.error);

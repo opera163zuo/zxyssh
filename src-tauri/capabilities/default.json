@@ -4,8 +4,7 @@
   "description": "Default capabilities for zxySSH",
   "platforms": [
     "linux",
-    "macOS",
-    "windows"
+    "macOS"
   ],
   "remote": {
     "urls": [

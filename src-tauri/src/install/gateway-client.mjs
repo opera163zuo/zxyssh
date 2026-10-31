@@ -14,7 +14,6 @@ const installedManifest = {{MANIFEST_PATH_JSON}};
 function manifestCandidates() {
   const home = os.homedir();
   if (process.platform === 'darwin') return [installedManifest, path.join(home, 'Library/Application Support/com.zxyssh.zxySSH/agent-gateway.json')];
-  if (process.platform === 'win32') return [installedManifest, path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData/Local'), 'zxyssh/agent-gateway.json')];
   return [installedManifest, path.join(process.env.XDG_DATA_HOME || path.join(home, '.local/share'), 'zxyssh/agent-gateway.json')];
 }
 

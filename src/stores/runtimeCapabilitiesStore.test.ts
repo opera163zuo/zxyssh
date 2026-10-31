@@ -16,14 +16,11 @@ import {
 
 const desktopCapabilities = {
   platform: 'linux',
-  isMobile: false,
   windowControls: true,
   localShell: true,
   agentGateway: true,
   desktopUpdater: true,
-  cliIpc: true,
   directoryTransfer: true,
-  backgroundTunnels: true,
 } as const;
 
 describe('runtimeCapabilitiesStore', () => {

@@ -38,7 +38,7 @@
       "../NOTICE": "NOTICE",
       "../licenses/legacy-MIT.txt": "licenses/legacy-MIT.txt"
     },
-    "targets": "all",
+    "targets": ["deb", "appimage"],
     "createUpdaterArtifacts": true,
     "fileAssociations": [
       {
@@ -91,23 +91,8 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico",
       "icons/icon.png"
-    ],
-    "windows": {
-      "nsis": {
-        "installMode": "both",
-        "installerHooks": "nsis-hooks.nsh"
-      },
-      "wix": {
-        "fragmentPaths": [
-          "wix-path-fragment.wxs"
-        ],
-        "componentGroupRefs": [
-          "ZxysshPathEnvGroup"
-        ]
-      }
-    }
+    ]
   },
   "plugins": {
     "updater": {

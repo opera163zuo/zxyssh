@@ -43,14 +43,11 @@ describe('AddServerDialog credential storage', () => {
       capabilities: {
         ...state.capabilities,
         platform: 'macos',
-        isMobile: false,
         windowControls: true,
         localShell: true,
         agentGateway: true,
         desktopUpdater: true,
-        cliIpc: true,
         directoryTransfer: true,
-        backgroundTunnels: true,
       },
       status: 'ready',
     }));
@@ -61,32 +58,6 @@ describe('AddServerDialog credential storage', () => {
 
     expect(screen.getByText('Credentials entered here are saved automatically on this device.'))
       .toBeInTheDocument();
-  });
-
-  it('uses pasted key content instead of a desktop file picker on mobile', () => {
-    useRuntimeCapabilitiesStore.setState((state) => ({
-      capabilities: {
-        ...state.capabilities,
-        platform: 'ios',
-        isMobile: true,
-        windowControls: false,
-        localShell: false,
-        agentGateway: false,
-        desktopUpdater: false,
-        cliIpc: false,
-        directoryTransfer: false,
-        backgroundTunnels: false,
-      },
-    }));
-    render(<AddServerDialog isOpen onClose={() => {}} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'SSH Key' }));
-
-    expect(screen.getByRole('textbox', { name: 'Private Key' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Browse' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('checkbox', { name: 'Save credentials on this device' })
-    ).not.toBeInTheDocument();
   });
 
   it('creates the server before saving name-keyed credentials', async () => {

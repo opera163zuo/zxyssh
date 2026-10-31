@@ -20,14 +20,11 @@ const testState = vi.hoisted(() => ({
   compact: true,
   capabilities: {
     platform: 'macos',
-    isMobile: false,
     windowControls: true,
     localShell: true,
     agentGateway: true,
     desktopUpdater: false,
-    cliIpc: true,
     directoryTransfer: true,
-    backgroundTunnels: true,
   },
   actions: {
     setActiveSession: vi.fn(),
@@ -217,14 +214,11 @@ describe('App workspace actions', () => {
     testState.compact = true;
     testState.capabilities = {
       platform: 'macos',
-      isMobile: false,
       windowControls: true,
       localShell: true,
       agentGateway: true,
       desktopUpdater: false,
-      cliIpc: true,
       directoryTransfer: true,
-      backgroundTunnels: true,
     };
     testState.actions.loadRuntimeCapabilities.mockImplementation(async () => (
       testState.capabilities

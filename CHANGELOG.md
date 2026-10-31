@@ -1,5 +1,116 @@
 # Changelog
 
+## Unreleased
+
+### Pairing is the code, nothing else
+
+The approval queue is gone, not defaulted off. In 2.1.0 a correct six-digit code
+only opened a request and nothing was issued until an operator approved it, which
+made an unattended Agent look dead whenever nobody was sitting at the desktop to
+click. Now `POST /pair {"name","code"}` returns the credential in one step, as in
+2.0.1, and the operator surface that decided requests has been deleted with it:
+`zxyssh mcp requests`, `zxyssh mcp approvals`, the five desktop commands behind
+them, and the approval checkbox and waiting list in Settings -> Agent access and
+pairing.
+
+Credential sealing stays. A client that sends `clientPublicKey` still gets its
+token through an ephemeral X25519 agreement fetched from `POST /pair/status`, so
+a listener on the same segment cannot read it, and it is still handed out
+exactly once. That handshake answers `202` with the status name
+`awaiting_approval` — kept so Agents written against 2.1.0 keep parsing it — but
+the state now means "sealed, poll for it"; no human is in the loop. A keyless
+client receives its credential in the clear, as before 2.1.0.
+
+
+### The desktop stopped pretending to be Windows
+
+The native menu bar is built explicitly now, so Linux shows **Edit** and
+**Workspace** only. The empty **Window** submenu and the duplicate Help/About
+dialog came from Tauri's default menu, which the app no longer uses.
+
+Settings lost two surfaces that never did anything: **Window Opacity** (labelled
+"Windows only", and no backend ever read the value) and the whole **SSH
+Defaults** section — default port, connection timeout, keepalive interval and
+default username were written to the settings blob and read by nobody, while
+the site editor keeps its own port and the SSH client keeps its own timeouts.
+**Session recording → storage location** now shows the directory the recorder
+actually writes to instead of a hard-coded `%APPDATA%` path.
+
+Saved settings keep working: the loader ignores the two dropped keys and stops
+writing them on the next change.
+
+### Code with no way in was deleted
+
+Four surfaces had lost their entry point but were still compiled, shipped and
+documented:
+
+- **Port forwarding.** `src-tauri/src/tunnel/` and its runtime requests are
+  gone. No MCP tool, CLI command or Tauri command could start a tunnel, so the
+  manager only ever stopped tunnels that never existed. Jump hosts are
+  unaffected — they bridge through a `direct-tcpip` channel inside
+  `SessionManager` and never used this code. A server that now asks to forward
+  a channel back to us is rejected outright instead of being matched against an
+  always-empty registry. The `tunnel_configs` table stays, as do the other
+  legacy tables, so an existing database is still readable.
+- **Database console.** The plugin dashboards (`src/components/PluginDashboards/`),
+  `dbConnectionsStore`, `commands/dbconn.rs` and `src-tauri/src/dbconn/` are
+  deleted, which also drops the `tokio-postgres`, `mysql_async` and
+  `tokio-stream` dependencies. The built-in plugin catalog and its generated
+  reference documents are unchanged; only the unreachable UI went.
+- **Config importers.** `src-tauri/src/ssh_import/` (OpenSSH, PuTTY, Tabby) had
+  no command registration and no caller.
+- **Dead capability flags.** `backgroundTunnels` and `cliIpc` were reported by
+  the backend and read by nobody but the tests that asserted they existed.
+
+The frontend tunnel store and its types went with them, and `Recording` moved
+to `src/types/recording.ts`.
+
+### Four surfaces we no longer ship
+
+Settings lost **AI Command Prediction** (BYOK ghost text), **Session Recording**,
+**Cloud Sync** (Gist / WebDAV / portable file) and every **mobile** code path.
+
+The mobile branch was the easy one: `src-tauri/gen/` holds no Android or iOS
+project, CI builds Linux only, and `tauri build` cannot produce a mobile
+artifact — so `local_shell_mobile.rs`, `capabilities/mobile.json`, the mobile
+icons, `MobileWorkspaceActions`, `RuntimePlatform::{Ios, Android}` and the
+`isMobile` branches were all unreachable.
+
+Prediction went with its settings blob and API-key field; the local
+history/path completion and its ghost-text overlay stay. Recording lost the
+`SessionLogger`, its six Tauri commands and the tab context-menu items; the
+`recordings` table and its storage layer remain, as the other legacy tables do.
+Cloud Sync lost the vault manager, its providers, its commands, the pairing-code
+UI and the autosave hook in `serverStore`.
+
+Deleting the recording commands also removed the last producer of the
+`SessionService` IPC request, so that variant and its dispatcher are gone too:
+the service socket now carries session I/O only.
+
+**Not yet removed:** the sync engine (`src-tauri/src/storage/sync.rs`, ~4.3k
+lines including 33 storage tests) and the outbox writes it still performs on
+every server and group save. Nothing consumes that outbox now. It is dead, but
+removing it means re-pointing the storage test suite that currently uses it to
+verify rename conflicts and cascade behaviour, so it stays until that is done on
+purpose.
+
+### Windows stopped being a target we pretend to support
+
+The app never shipped a Windows build, but it carried the Windows half of every
+platform decision: an NSIS/WiX installer block pointing at a `nsis-hooks.nsh`
+that is not in this repository, a `.wxs` PATH fragment, `.ico` and
+`Square*Logo` assets, a `windows-sys` and a `winreg` dependency, named-pipe
+transport in the service IPC, a `GetAsyncKeyState` docking gesture, PowerShell
+and `cmd` in the local-shell detector, and `wmic` in the status panel. All of it
+is gone, and `ipc/socket.rs` now reads as the Unix-socket implementation it is.
+
+`bundle.targets` is `["deb", "appimage"]` instead of "whatever the host can
+build", `capabilities/default.json` lists `linux` and `macOS`, and
+`scripts/check-release.mjs` plus `src-tauri/tests/acl_and_icons_config_test.rs`
+now assert that instead of the old triple. `RuntimePlatform` no longer has a
+`Windows` variant, so the settings screen and title bar dropped their
+Windows-only branches too.
+
 ## 2.1.0 — 2026-10-22
 
 ### Pairing became an access decision, not a handoff

@@ -1,4 +1,3 @@
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use anyhow::Context;
 use anyhow::Result;
 use std::fs;
@@ -19,19 +18,10 @@ pub(crate) fn fingerprint_path(app_data_dir: &Path) -> PathBuf {
 /// Same value as the GUI's `app.path().app_data_dir()`, resolved without a
 /// running Tauri runtime so headless entry points (CLI daemon, import) share
 /// one data directory with the desktop application.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn default_app_data_dir() -> Result<PathBuf> {
     let base_dirs =
         directories::BaseDirs::new().context("Could not determine platform base directories")?;
     Ok(base_dirs.data_dir().join(APP_BUNDLE_IDENTIFIER))
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub(crate) fn default_app_data_dir() -> Result<PathBuf> {
-    anyhow::bail!(
-        "The default {} data directory can only be resolved on desktop platforms",
-        APP_BUNDLE_IDENTIFIER
-    );
 }
 
 /// Default database location for entry points without an AppHandle. Creates the
@@ -51,7 +41,7 @@ fn prepared_default_app_data_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

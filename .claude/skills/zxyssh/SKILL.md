@@ -1,6 +1,6 @@
 ---
 name: zxyssh
-description: Use the zxySSH SSH service through its MCP endpoint for site listing, persistent terminal sessions, and server-managed sudo; pair an Agent with a one-time code that an operator must approve, and administer the service with the native CLI.
+description: Use the zxySSH SSH service through its MCP endpoint for site listing, persistent terminal sessions, and server-managed sudo; pair an Agent with a one-time code, and administer the service with the native CLI.
 ---
 
 # zxySSH
@@ -19,31 +19,29 @@ An operator mints a single-use six-digit code, either in the desktop app (Settin
 zxyssh mcp pair-code
 ```
 
-Pairing then waits for a human. Exchanging the code creates a request, and no credential exists until an operator approves it:
+A correct code pairs immediately; there is no approval step:
 
 ```text
-POST /pair {"name":"<agent name>","code":"<six digits>","clientPublicKey":"<base64url X25519>"}
+POST /pair {"name":"<agent name>","code":"<six digits>"}
+     -> 200 {"token":"..."}
+```
+
+`zxyssh mcp pair --endpoint <url> --name <name>` is the reference client: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once.
+
+A client that offers `clientPublicKey` gets that credential sealed rather than printed in the response, which is what keeps it safe on a plain-HTTP listener:
+
+```text
+POST /pair {"name":"...","code":"...","clientPublicKey":"<base64url X25519>"}
      -> 202 {"requestId":"...","status":"awaiting_approval","pollPath":"/pair/status"}
 POST /pair/status {"requestId":"..."}
-     -> 200 {"status":"awaiting_approval"}
      -> 200 {"status":"delivered","agentId":"...","name":"...","serverPublicKey":"...","sealedToken":"...","tokenType":"Bearer-sealed"}
 ```
 
-Approve or refuse from either side, on the same registry:
+The `202` and the `awaiting_approval` name are the sealed-delivery handshake, not a queue: the service seals the credential the moment the code is spent, and the first poll takes it away. The agreement is an ephemeral X25519 pair, so a listener on the same segment cannot read the token, and it is handed out exactly once. A keyless client still receives its credential in the clear.
 
-```bash
-zxyssh mcp requests list
-zxyssh mcp requests approve <requestId|prefix>
-zxyssh mcp requests reject <requestId|prefix>
-zxyssh mcp approvals            # show the mode
-zxyssh mcp approvals --set off  # issue credentials immediately again
-```
+The code expires after 300 seconds, five wrong guesses spend it, and a sealed request nobody polls expires after 900 seconds. Keep tokens out of prompts, logs, and files. `zxyssh mcp agents` lists paired Agents; `revoke`, `rename`, and `rotate` change credentials, and a revoked or rotated token stops working on the next request.
 
-With the approval queue on, `clientPublicKey` is required: a keyless client could not read a sealed delivery, so `POST /pair` answers `400` and leaves the code unspent. Turn the queue off (`zxyssh mcp approvals --set off`) to restore the one-step shape `POST /pair {"name","code"}` -> `200 {"token":...}`, which returns the credential in the clear. With a key, the credential is sealed through an ephemeral X25519 agreement so a listener on the segment cannot read it, and it is delivered once. `zxyssh mcp pair --endpoint <url> --name <name>` is the reference client: it reads the code from stdin, waits for approval, and prints the credential once.
-
-The code expires after 300 seconds, five wrong guesses spend it, and an unanswered request expires after 900 seconds. Keep tokens out of prompts, logs, and files. `zxyssh mcp agents` lists paired Agents; `revoke`, `rename`, and `rotate` change credentials, and a revoked or rotated token stops working on the next request.
-
-The listener defaults to `127.0.0.1:8765`. Reaching it over a LAN requires `ZXYSSH_MCP_BIND=<address>:<port>` with `ZXYSSH_MCP_ALLOW_LAN=true`, a concrete address, and at least one already-paired Agent; the service publishes what it bound to in `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json`, which the desktop shows. This transport is plain HTTP for a trusted internal network: approval and sealing protect the credential, while the pairing code itself still crosses the wire in the clear.
+The listener defaults to `127.0.0.1:8765`. Reaching it over a LAN requires `ZXYSSH_MCP_BIND=<address>:<port>` with `ZXYSSH_MCP_ALLOW_LAN=true`, a concrete address, and at least one already-paired Agent; the service publishes what it bound to in `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json`, which the desktop shows. This transport is plain HTTP for a trusted internal network: sealing protects the credential when a key is offered, while the pairing code itself still crosses the wire in the clear.
 
 ## Use the MCP tools
 

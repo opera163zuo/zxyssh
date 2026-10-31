@@ -1,10 +1,9 @@
 import { useState, useCallback, memo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, X, Loader2, AlertCircle, Wifi, Monitor, Circle, RefreshCw, ExternalLink, Save } from 'lucide-react';
+import { Plus, X, Loader2, AlertCircle, Wifi, Monitor, RefreshCw, ExternalLink, Save } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
 import { useSessionStore, type Session, type SessionState, type SessionType } from '../../stores/sessionStore';
-import { useRecordingStore } from '../../stores/recordingStore';
 import { useFileWorkspaceStore, type FileWorkspaceTab as FileTabModel } from '../../stores/fileWorkspaceStore';
 import { openDetachedWindow, useDetachedOwnership, canCloseWorkspaceSession } from '../../lib/detach';
 import { sessionPaneId, filePaneId } from '../../lib/paneIds';
@@ -64,7 +63,6 @@ function getStateIndicator(
 interface SessionTabProps {
   session: Session;
   isActive: boolean;
-  isRecording: boolean;
   onSelect: () => void;
   onReconnect?: () => void;
   onClose: () => void;
@@ -80,7 +78,6 @@ interface SessionTabProps {
 const SessionTab = memo(function SessionTab({
   session,
   isActive,
-  isRecording,
   onSelect,
   onReconnect,
   onClose,
@@ -145,13 +142,6 @@ const SessionTab = memo(function SessionTab({
       <span className="truncate text-sm font-medium flex-1">
         {session.serverName}
       </span>
-
-      {/* Recording Indicator */}
-      {isRecording && (
-        <span className="flex-shrink-0" title="Recording session">
-          <Circle className="w-2.5 h-2.5 text-tokyo-red fill-tokyo-red animate-pulse" />
-        </span>
-      )}
 
       {/* Reconnect Button */}
       {canReconnect && (
@@ -256,9 +246,6 @@ interface TabContextMenuProps {
   x: number;
   y: number;
   session: Session;
-  isRecording: boolean;
-  onStartRecording: () => void;
-  onStopRecording: () => void;
   onReconnect: () => void;
   onOpenInWindow?: () => void;
   onClose: () => void;
@@ -268,9 +255,6 @@ function TabContextMenu({
   x,
   y,
   session,
-  isRecording,
-  onStartRecording,
-  onStopRecording,
   onReconnect,
   onOpenInWindow,
   onClose,
@@ -296,25 +280,6 @@ function TabContextMenu({
       onClick: onOpenInWindow,
     });
   }
-  if (session.state === 'connected') {
-    if (isRecording) {
-      items.push({
-        id: 'stop-recording',
-        label: t('session.stopRecording'),
-        icon: <Circle className="w-3 h-3 fill-tokyo-red" />,
-        onClick: onStopRecording,
-        danger: true,
-      });
-    } else {
-      items.push({
-        id: 'start-recording',
-        label: t('session.startRecording'),
-        icon: <Circle className="w-3 h-3 text-tokyo-red" />,
-        onClick: onStartRecording,
-      });
-    }
-  }
-
   return (
     <ContextMenu
       isOpen
@@ -341,7 +306,6 @@ export function SessionTabs({ onNewSession, onReconnectSession, onOpenSessionInW
     closeTab: closeFileTab,
     moveTabBefore: moveFileTabBefore,
   } = useFileWorkspaceStore();
-  const { isRecording, startRecording, stopRecording } = useRecordingStore();
   const owners = useDetachedOwnership((state) => state.owners);
   const visibleSessions = sessions.filter((session) => !owners[sessionPaneId(session.id)]);
   const visibleFiles = fileTabs.filter((tab) => !owners[filePaneId(tab.id)]);
@@ -421,14 +385,6 @@ export function SessionTabs({ onNewSession, onReconnectSession, onOpenSessionInW
     setContextMenu({ x: e.clientX, y: e.clientY, session });
   }, []);
 
-  const handleStartRecording = useCallback(async (session: Session) => {
-    await startRecording(session.id, session.serverId);
-  }, [startRecording]);
-
-  const handleStopRecording = useCallback(async (session: Session) => {
-    await stopRecording(session.id);
-  }, [stopRecording]);
-
   const handleReconnect = useCallback((session: Session) => {
     if (!canCloseWorkspaceSession(session.id)) return;
     const dirtyFileCount = fileTabs.filter((tab) => tab.sessionId === session.id && tab.dirty).length;
@@ -463,7 +419,6 @@ export function SessionTabs({ onNewSession, onReconnectSession, onOpenSessionInW
               key={session.id}
               session={session}
               isActive={activeFileTabId === null && activeSessionId === session.id}
-              isRecording={isRecording(session.id)}
               onSelect={() => handleSelectSession(session.id)}
               onReconnect={() => handleReconnect(session)}
               onClose={() => handleRequestClose(session)}
@@ -521,9 +476,6 @@ export function SessionTabs({ onNewSession, onReconnectSession, onOpenSessionInW
           x={contextMenu.x}
           y={contextMenu.y}
           session={contextMenu.session}
-          isRecording={isRecording(contextMenu.session.id)}
-          onStartRecording={() => handleStartRecording(contextMenu.session)}
-          onStopRecording={() => handleStopRecording(contextMenu.session)}
           onReconnect={() => handleReconnect(contextMenu.session)}
           onOpenInWindow={onOpenSessionInWindow ? () => onOpenSessionInWindow(contextMenu.session) : undefined}
           onClose={() => setContextMenu(null)}

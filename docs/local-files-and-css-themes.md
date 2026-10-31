@@ -81,4 +81,4 @@ cargo test --manifest-path src-tauri/Cargo.toml commands::local_files::tests --l
 ZXYSSH_DOCUMENT_SMOKE=run ZXYSSH_SKIP_SKILL_AUTO_INSTALL=1 npm run tauri -- dev --no-watch --config '{"identifier":"com.zxyssh.document-smoke","build":{"devUrl":"http://localhost:14732","beforeDevCommand":"node node_modules/vite/bin/vite.js --port 14732"}}'
 ```
 
-不同 bundle identifier 使用独立数据库和 Agent 发现文件，不导入正式应用的旧数据库。本地 macOS 原生场景已经验证：四种文件读取与实际显示、Markdown 源码/预览并排、原生整数坐标、文件独立窗口返回、CSS 色板及窗口同步、背景点击穿透、隐藏界面后的快捷键恢复。物理鼠标跨不同缩放显示器的完整手势和 Windows/Linux 桌面仍需独立验收。
+不同 bundle identifier 使用独立数据库和 Agent 发现文件，不导入正式应用的旧数据库。本地 macOS 原生场景已经验证：四种文件读取与实际显示、Markdown 源码/预览并排、原生整数坐标、文件独立窗口返回、CSS 色板及窗口同步、背景点击穿透、隐藏界面后的快捷键恢复。物理鼠标跨不同缩放显示器的完整手势在 Linux 桌面仍需独立验收。

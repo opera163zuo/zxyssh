@@ -7,12 +7,9 @@ use serde::{Deserialize, Serialize};
 pub enum PairingError {
     InvalidCode,
     InvalidName,
-    /// The approval queue delivers credentials sealed, so a client that cannot
-    /// present a key would receive a credential it cannot read.
-    ClientKeyRequired,
     /// A presented key is not a usable X25519 public key. Checked before the
-    /// pairing code is spent, so a malformed body cannot burn a code and leave
-    /// the operator approving a request that then fails.
+    /// pairing code is spent, so a malformed body cannot burn a code and then
+    /// fail to deliver.
     InvalidClientKey,
     /// The registry could not be written. The in-memory change is rolled back.
     Storage(String),
@@ -47,25 +44,21 @@ struct AgentRecord {
     revoked: bool,
 }
 
-/// Where a pairing request stands in the operator's approval queue.
+/// Where a sealed pairing request stands. The wire names stay as they were in
+/// 2.1.0 so an Agent that is already polling `/pair/status` keeps parsing them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PairRequestStatus {
-    /// The code was correct; nothing has been issued until the operator decides.
+    /// The code was correct; the credential is being sealed for delivery.
     #[default]
-    AwaitingApproval,
-    /// Approved. The credential is waiting to be handed back exactly once.
+    #[serde(rename = "awaiting_approval")]
+    AwaitingDelivery,
+    /// Sealed. The credential is waiting to be handed back exactly once.
     Approved,
-    /// The operator refused this request. A new pairing code is required.
-    Rejected,
     /// The credential was delivered to the Agent that requested it.
     Delivered,
-    /// Nobody decided in time.
+    /// The Agent never polled before the request aged out.
     Expired,
-}
-
-fn approval_required_by_default() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,28 +81,12 @@ struct StoredPairRequest {
     sealed_credential: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RegistryState {
     agents: HashMap<String, AgentRecord>,
     pending: Option<PendingCode>,
     #[serde(default)]
     requests: HashMap<String, StoredPairRequest>,
-    /// Persisted registries that predate the approval queue already carry no
-    /// field, and are treated as requiring approval rather than silently
-    /// keeping one-step pairing.
-    #[serde(default = "approval_required_by_default")]
-    require_approval: bool,
-}
-
-impl Default for RegistryState {
-    fn default() -> Self {
-        Self {
-            agents: HashMap::new(),
-            pending: None,
-            requests: HashMap::new(),
-            require_approval: approval_required_by_default(),
-        }
-    }
 }
 
 fn digest_token(token: &str) -> String {
@@ -162,23 +139,12 @@ pub struct AgentSummary {
 
 /// A pairing request as the desktop UI and the CLI show it. Never carries
 /// credential material.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairRequestSummary {
-    pub id: String,
-    pub agent_name: String,
-    pub peer: String,
-    pub created_at: i64,
-    pub expires_at: i64,
-    pub status: PairRequestStatus,
-}
-
 /// Outcome of a pairing attempt that consumed a code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PairStarted {
     /// Pairing completed in one step; the bearer token is in hand.
     Issued(IssuedAgent),
-    /// Nothing is issued until an operator approves `request_id`.
+    /// The credential is sealed to the presented key and fetched from `/pair/status`.
     Awaiting { request_id: String },
 }
 
@@ -348,10 +314,9 @@ impl PairingRegistry {
         Ok(IssuedAgent { id, name, token })
     }
 
-    /// Spend a code on a pairing request instead of issuing a credential. With
-    /// `client_public_key` the credential later travels back sealed to that key;
-    /// without it, an approval-queue delivery is cleartext, which is what clients
-    /// that predate key exchange can parse.
+    /// Spend a code. Without `client_public_key` the credential is issued in the
+    /// response; with one it is sealed to that key and fetched from
+    /// `/pair/status`, so a listener on the segment cannot read it.
     pub fn begin_pairing(
         &mut self,
         name: &str,
@@ -367,12 +332,6 @@ impl PairingRegistry {
             }
         }
         if client_public_key.is_none() {
-            // A keyless client cannot read a sealed delivery, so the approval
-            // queue refuses it before spending the code; one-step mode still
-            // answers it with a cleartext credential as before.
-            if self.state.require_approval {
-                return Err(PairingError::ClientKeyRequired);
-            }
             return self.pair(&name, code, now).map(PairStarted::Issued);
         }
         let previous = self.state.clone();
@@ -386,7 +345,7 @@ impl PairingRegistry {
                 peer: peer.to_string(),
                 created_at: now,
                 expires_at: now + PAIR_REQUEST_TTL_SECONDS,
-                status: PairRequestStatus::AwaitingApproval,
+                status: PairRequestStatus::AwaitingDelivery,
                 client_public_key: client_public_key.map(str::to_string),
                 pairing_code,
                 agent_id: None,
@@ -399,26 +358,16 @@ impl PairingRegistry {
             self.state = previous;
             return Err(error);
         }
-        if !self.state.require_approval {
-            // Sealed clients always fetch their credential by polling, so an
-            // approval-free service approves the request itself right away.
-            self.approve_request(&request_id, now)?;
-        }
+        // Nothing waits for a decision: the credential is sealed right away and
+        // the Agent picks it up by polling `/pair/status`.
+        self.finalize_request(&request_id, now)?;
         Ok(PairStarted::Awaiting { request_id })
     }
 
-    pub fn pairing_approval_required(&self) -> bool {
-        self.state.require_approval
-    }
-
-    pub fn set_pairing_approval_required(&mut self, required: bool) -> Result<(), PairingError> {
-        self.apply(|state| state.require_approval = required)
-    }
-
-    /// Issue the credential for an awaiting request. The Agent record and the
+    /// Seal and release the credential for a request. The Agent record and the
     /// request transition are written together, so a failed write cannot leave a
-    /// live credential with no owner or an approved request with none.
-    pub fn approve_request(
+    /// live credential with no owner or a finished request with none.
+    fn finalize_request(
         &mut self,
         id: &str,
         now: i64,
@@ -426,7 +375,7 @@ impl PairingRegistry {
         let Some(request) = self.state.requests.get(id) else {
             return Ok(None);
         };
-        if request.status != PairRequestStatus::AwaitingApproval {
+        if request.status != PairRequestStatus::AwaitingDelivery {
             let summary = request.agent_id.as_ref().and_then(|agent_id| {
                 self.state.agents.get(agent_id).map(|agent| AgentSummary {
                     id: agent.id.clone(),
@@ -483,29 +432,13 @@ impl PairingRegistry {
         Ok(Some(summary))
     }
 
-    pub fn reject_request(&mut self, id: &str) -> Result<bool, PairingError> {
-        let Some(request) = self.state.requests.get(id) else {
-            return Ok(false);
-        };
-        if request.status != PairRequestStatus::AwaitingApproval {
-            return Ok(false);
-        }
-        self.apply(|state| {
-            if let Some(entry) = state.requests.get_mut(id) {
-                entry.status = PairRequestStatus::Rejected;
-                entry.pairing_code = String::new();
-            }
-        })
-        .map(|()| true)
-    }
-
     /// Read one step of a pairing request. An approved credential is released
     /// exactly once: the request moves to `Delivered` and keeps no material.
     pub fn poll_request(&mut self, id: &str, now: i64) -> Result<Option<PairPoll>, PairingError> {
         let Some(request) = self.state.requests.get(id) else {
             return Ok(None);
         };
-        if request.status == PairRequestStatus::AwaitingApproval && now >= request.expires_at {
+        if request.status == PairRequestStatus::AwaitingDelivery && now >= request.expires_at {
             self.expire_request(id)?;
             return Ok(Some(PairPoll {
                 status: PairRequestStatus::Expired,
@@ -570,43 +503,6 @@ impl PairingRegistry {
         for agent_id in abandoned {
             self.state.agents.remove(&agent_id);
         }
-    }
-
-    /// Pairing requests worth showing an operator: those still awaiting a
-    /// decision and those approved but not yet fetched. Terminal rows stay in
-    /// storage until the next sweep so the list cannot fill with history.
-    pub fn list_requests(&self, now: i64) -> Vec<PairRequestSummary> {
-        let mut requests: Vec<PairRequestSummary> = self
-            .state
-            .requests
-            .values()
-            .filter(|request| {
-                matches!(
-                    request.status,
-                    PairRequestStatus::AwaitingApproval | PairRequestStatus::Approved
-                ) && (request.status != PairRequestStatus::AwaitingApproval
-                    || request.expires_at > now)
-            })
-            .map(|request| PairRequestSummary {
-                id: request.id.clone(),
-                agent_name: request.agent_name.clone(),
-                peer: request.peer.clone(),
-                created_at: request.created_at,
-                expires_at: request.expires_at,
-                status: match request.status {
-                    PairRequestStatus::AwaitingApproval if request.expires_at <= now => {
-                        PairRequestStatus::Expired
-                    }
-                    other => other,
-                },
-            })
-            .collect();
-        requests.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.agent_name.cmp(&right.agent_name))
-        });
-        requests
     }
 
     /// Map a bearer token to its Agent, or `None` when no active Agent owns it.
@@ -804,64 +700,6 @@ mod tests {
     }
 
     #[test]
-    fn a_keyless_request_is_refused_without_spending_the_code() {
-        let mut registry = PairingRegistry::new();
-        let code = registry.create_code(NOW).unwrap();
-        assert_eq!(
-            registry
-                .begin_pairing("hermes-legacy", &code, None, "peer", NOW)
-                .unwrap_err(),
-            PairingError::ClientKeyRequired
-        );
-        // The refusal happened before the code was consumed, so the same code
-        // still pairs once the client presents a key.
-        assert!(registry
-            .begin_pairing("hermes-legacy", &code, Some(&client_key()), "peer", NOW)
-            .is_ok());
-    }
-
-    #[test]
-    fn approval_queue_holds_the_credential_until_decided() {
-        let mut registry = PairingRegistry::new();
-        assert!(registry.pairing_approval_required());
-        let code = registry.create_code(NOW).unwrap();
-        let started = registry
-            .begin_pairing(
-                "hermes-lab",
-                &code,
-                Some(&client_key()),
-                "192.168.0.20",
-                NOW,
-            )
-            .unwrap();
-        let request_id = match started {
-            PairStarted::Awaiting { request_id } => request_id,
-            PairStarted::Issued(_) => panic!("approval must hold issuance"),
-        };
-        assert_eq!(registry.active_agent_count(), 0);
-        assert_eq!(
-            registry
-                .poll_request(&request_id, NOW)
-                .unwrap()
-                .unwrap()
-                .status,
-            PairRequestStatus::AwaitingApproval
-        );
-        let approved = registry
-            .approve_request(&request_id, NOW)
-            .unwrap()
-            .expect("agent summary");
-        assert_eq!(approved.name, "hermes-lab");
-        assert_eq!(registry.active_agent_count(), 1);
-        let delivered = registry.poll_request(&request_id, NOW).unwrap().unwrap();
-        assert_eq!(delivered.status, PairRequestStatus::Delivered);
-        assert!(delivered.sealed_credential.is_some() && delivered.server_public_key.is_some());
-        let second = registry.poll_request(&request_id, NOW).unwrap().unwrap();
-        assert_eq!(second.status, PairRequestStatus::Delivered);
-        assert!(second.sealed_credential.is_none());
-    }
-
-    #[test]
     fn a_spent_code_cannot_open_a_second_request() {
         let mut registry = PairingRegistry::new();
         let code = registry.create_code(NOW).unwrap();
@@ -874,104 +712,7 @@ mod tests {
                 .unwrap_err(),
             PairingError::InvalidCode
         );
-        assert_eq!(registry.list_requests(NOW).len(), 1);
-    }
-
-    #[test]
-    fn an_unanswered_request_expires_and_stops_accepting_polls() {
-        let mut registry = PairingRegistry::new();
-        let code = registry.create_code(NOW).unwrap();
-        let request_id = match registry
-            .begin_pairing("hermes-late", &code, Some(&client_key()), "peer", NOW)
-            .unwrap()
-        {
-            PairStarted::Awaiting { request_id } => request_id,
-            PairStarted::Issued(_) => panic!("expected a queued request"),
-        };
-        let later = NOW + PAIR_REQUEST_TTL_SECONDS;
-        assert_eq!(
-            registry
-                .poll_request(&request_id, later)
-                .unwrap()
-                .unwrap()
-                .status,
-            PairRequestStatus::Expired
-        );
-        assert!(
-            registry
-                .approve_request(&request_id, later)
-                .unwrap()
-                .is_none(),
-            "an expired request must not be approvable"
-        );
-        assert_eq!(registry.active_agent_count(), 0);
-    }
-
-    #[test]
-    fn terminal_requests_are_pruned_so_the_registry_cannot_grow() {
-        let mut registry = PairingRegistry::new();
-        for index in 0..5 {
-            let code = registry.create_code(NOW).unwrap();
-            let request_id = match registry
-                .begin_pairing(
-                    &format!("agent-{index}"),
-                    &code,
-                    Some(&client_key()),
-                    "peer",
-                    NOW,
-                )
-                .unwrap()
-            {
-                PairStarted::Awaiting { request_id } => request_id,
-                PairStarted::Issued(_) => panic!("expected a queued request"),
-            };
-            registry.reject_request(&request_id).unwrap();
-        }
-        assert!(registry.list_requests(NOW).is_empty());
-        // A new request triggers the sweep of old terminal ones.
-        let code = registry.create_code(NOW).unwrap();
-        registry
-            .begin_pairing("fresh", &code, Some(&client_key()), "peer", NOW)
-            .unwrap();
-        let requests = registry.list_requests(NOW);
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].agent_name, "fresh");
-    }
-
-    #[test]
-    fn approval_mode_travels_with_the_persisted_registry() {
-        let (_dir, database) = temp_database();
-        {
-            let mut registry = PairingRegistry::load(database.clone()).unwrap();
-            assert!(
-                registry.pairing_approval_required(),
-                "a fresh registry starts by requiring approval"
-            );
-            registry.set_pairing_approval_required(false).unwrap();
-        }
-        let reopened = PairingRegistry::load(database).unwrap();
-        assert!(!reopened.pairing_approval_required());
-    }
-
-    #[test]
-    fn a_registry_from_the_previous_release_keeps_no_approval_assumption() {
-        // 2.0.1 stored no approval field; reading it must not silently downgrade
-        // the deployment to one-step pairing.
-        let (_dir, database) = temp_database();
-        let legacy = r#"{"agents":{},"pending":null}"#;
-        let crypto = crate::storage::crypto::Crypto::device().unwrap();
-        database
-            .set_setting(
-                REGISTRY_SETTING,
-                &format!(
-                    "enc:v1:{}",
-                    crypto.encrypt_base64(legacy.as_bytes()).unwrap()
-                ),
-            )
-            .unwrap();
-        assert!(PairingRegistry::load(database)
-            .unwrap()
-            .pairing_approval_required());
+        assert_eq!(registry.active_agent_count(), 1);
     }
 
     #[test]

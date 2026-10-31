@@ -7,22 +7,6 @@ export interface PairedAgent {
   revoked: boolean;
 }
 
-export type PairingRequestStatus =
-  | 'awaiting_approval'
-  | 'approved'
-  | 'rejected'
-  | 'delivered'
-  | 'expired';
-
-export interface PairingRequest {
-  id: string;
-  agentName: string;
-  peer: string;
-  createdAt: number;
-  expiresAt: number;
-  status: PairingRequestStatus;
-}
-
 export interface PairingCode {
   code: string;
   expiresAt: number;
@@ -32,18 +16,14 @@ export interface LanListenerStatus {
   bind: string;
   allowLan: boolean;
   credentialSealing: boolean;
-  approvalRequired: boolean;
   pid: number;
   startedAt: number;
   activeAgents: number;
-  pendingRequests: number;
 }
 
 interface PairingState {
   code: PairingCode | null;
-  requests: PairingRequest[];
   agents: PairedAgent[];
-  approvalRequired: boolean;
   lanStatus: LanListenerStatus | null;
   /** A replacement credential is shown once, then dropped from memory. */
   issuedToken: string | null;
@@ -51,36 +31,24 @@ interface PairingState {
   error: string | null;
   refresh: () => Promise<void>;
   createCode: () => Promise<void>;
-  approve: (requestId: string) => Promise<void>;
-  reject: (requestId: string) => Promise<void>;
   revoke: (agentId: string) => Promise<void>;
   rename: (agentId: string, name: string) => Promise<void>;
   rotate: (agentId: string) => Promise<void>;
   dismissIssuedToken: () => void;
-  setApprovalRequired: (required: boolean) => Promise<void>;
 }
 
 export const useMcpPairingStore = create<PairingState>((set, get) => {
-  // Reading the registry is deliberately not gated on `busy`: every action
-  // re-reads the lists while it still holds the flag, and gating the reload
-  // would leave the panel showing a queue the operator just changed.
   const load = async () => {
-    const [requests, agents, approval, lan] = await Promise.all([
-      safeInvoke<PairingRequest[]>('mcp_pair_requests_list'),
+    const [agents, lan] = await Promise.all([
       safeInvoke<PairedAgent[]>('mcp_agents_list'),
-      safeInvoke<boolean>('mcp_pairing_approval_get'),
       safeInvoke<LanListenerStatus | null>('mcp_lan_status'),
     ]);
-    for (const result of [requests, agents, approval]) {
-      if (!result.success) {
-        set({ error: result.error.message });
-        return false;
-      }
+    if (!agents.success) {
+      set({ error: agents.error.message });
+      return false;
     }
     set({
-      requests: requests.success ? requests.data : get().requests,
-      agents: agents.success ? agents.data : get().agents,
-      approvalRequired: approval.success ? approval.data : get().approvalRequired,
+      agents: agents.data,
       // A missing listener status file means "not running", not an error.
       lanStatus: lan.success ? lan.data : null,
       error: null,
@@ -107,9 +75,7 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
 
   return {
     code: null,
-    requests: [],
     agents: [],
-    approvalRequired: true,
     lanStatus: null,
     issuedToken: null,
     busy: false,
@@ -140,24 +106,12 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
       }
     },
 
-    approve: async (requestId) => {
-      await write('mcp_pair_request_approve', { requestId });
-    },
-
-    reject: async (requestId) => {
-      await write('mcp_pair_request_reject', { requestId });
-    },
-
     revoke: async (agentId) => {
       await write('mcp_agent_revoke', { agentId });
     },
 
     rename: async (agentId, name) => {
       await write('mcp_agent_rename', { agentId, name });
-    },
-
-    setApprovalRequired: async (required) => {
-      await write('mcp_pairing_approval_set', { required });
     },
 
     rotate: async (agentId) => {

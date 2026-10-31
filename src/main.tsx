@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import "./i18n"; // Initialize i18n before App
 import App from "./App";
 import "./styles.css";
-import { CloudSyncLifecycle } from "./components/CloudSyncLifecycle";
 import { DetachedWindow } from "./components/DetachedWindow";
 import { parseDetachTarget } from "./lib/detach";
 
@@ -16,10 +15,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     {detachTarget ? (
       <DetachedWindow target={detachTarget} />
     ) : (
-      <>
-        <CloudSyncLifecycle />
-        <App />
-      </>
+      <App />
     )}
   </React.StrictMode>,
 );
