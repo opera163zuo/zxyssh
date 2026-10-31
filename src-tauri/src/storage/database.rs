@@ -7,28 +7,12 @@ use uuid::Uuid;
 
 use super::sync::{self, SyncEntityKind};
 use crate::storage::models::{
-    AuthType, CommandHistoryEntry, CommandSnippet, DatabaseConnection, PluginInstallation,
-    Recording, Server, TunnelConfig, TunnelType,
+    AuthType, CommandHistoryEntry, CommandSnippet, PluginInstallation, Recording, Server,
+    TunnelConfig, TunnelType,
 };
 
 pub struct Database {
     pub(super) conn: Mutex<Connection>,
-}
-
-fn row_to_database_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<DatabaseConnection> {
-    Ok(DatabaseConnection {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        engine: row.get(2)?,
-        host: row.get(3)?,
-        port: row.get::<_, i64>(4)? as u16,
-        username: row.get(5)?,
-        password_encrypted: row.get(6)?,
-        default_database: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
-        last_connected_at: row.get(10)?,
-    })
 }
 
 fn row_to_plugin_installation(row: &rusqlite::Row<'_>) -> rusqlite::Result<PluginInstallation> {
@@ -1601,83 +1585,6 @@ impl Database {
     }
 
     // === Plugin Operations ===
-
-    // -----------------------------------------------------------------------
-    // Database connections
-    // -----------------------------------------------------------------------
-
-    pub fn database_connection_list(&self) -> Result<Vec<DatabaseConnection>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, engine, host, port, username, password_encrypted, \
-             default_database, created_at, updated_at, last_connected_at \
-             FROM database_connections ORDER BY name COLLATE NOCASE ASC",
-        )?;
-        let records = stmt
-            .query_map([], row_to_database_connection)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(records)
-    }
-
-    pub fn database_connection_get(&self, id: &str) -> Result<Option<DatabaseConnection>> {
-        let conn = self.conn.lock().unwrap();
-        let result = conn.query_row(
-            "SELECT id, name, engine, host, port, username, password_encrypted, \
-             default_database, created_at, updated_at, last_connected_at \
-             FROM database_connections WHERE id = ?1",
-            [id],
-            row_to_database_connection,
-        );
-        match result {
-            Ok(record) => Ok(Some(record)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    pub fn database_connection_upsert(&self, connection: &DatabaseConnection) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO database_connections \
-             (id, name, engine, host, port, username, password_encrypted, \
-              default_database, created_at, updated_at, last_connected_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-             ON CONFLICT(id) DO UPDATE SET \
-               name = excluded.name, engine = excluded.engine, host = excluded.host, \
-               port = excluded.port, username = excluded.username, \
-               password_encrypted = excluded.password_encrypted, \
-               default_database = excluded.default_database, updated_at = excluded.updated_at",
-            rusqlite::params![
-                connection.id,
-                connection.name,
-                connection.engine,
-                connection.host,
-                connection.port,
-                connection.username,
-                connection.password_encrypted,
-                connection.default_database,
-                connection.created_at,
-                connection.updated_at,
-                connection.last_connected_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn database_connection_touch(&self, id: &str, connected_at: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE database_connections SET last_connected_at = ?2 WHERE id = ?1",
-            rusqlite::params![id, connected_at],
-        )?;
-        Ok(())
-    }
-
-    pub fn database_connection_delete(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM database_connections WHERE id = ?1", [id])?;
-        Ok(())
-    }
 
     pub fn plugin_installation_list(&self) -> Result<Vec<PluginInstallation>> {
         let conn = self.conn.lock().unwrap();

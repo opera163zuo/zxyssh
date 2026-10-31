@@ -1276,62 +1276,11 @@ fn parse_memory_info_macos(vm_stat_output: &str, memsize_output: &str) -> Memory
     }
 }
 
-fn parse_wmic_value(output: &str, key: &str) -> Option<u64> {
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if let Some(value) = trimmed.strip_prefix(&format!("{}=", key)) {
-            if let Ok(parsed) = value.trim().parse::<u64>() {
-                return Some(parsed);
-            }
-        }
-    }
-    None
-}
-
-fn parse_disk_info_windows(wmic_output: &str) -> Vec<DiskInfo> {
-    let mut disks = Vec::new();
-
-    for line in wmic_output.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("Node,") {
-            continue;
-        }
-
-        let parts: Vec<&str> = trimmed.split(',').collect();
-        if parts.len() < 5 {
-            continue;
-        }
-
-        let filesystem = parts[2].trim().to_string();
-        let mount_point = parts[1].trim().to_string();
-        let free = parts[3].trim().parse::<u64>().unwrap_or(0);
-        let total = parts[4].trim().parse::<u64>().unwrap_or(0);
-        let used = total.saturating_sub(free);
-        let usage_percent = if total > 0 {
-            (used as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        disks.push(DiskInfo {
-            mount_point,
-            filesystem,
-            total,
-            used,
-            available: free,
-            usage_percent,
-        });
-    }
-
-    disks
-}
-
 pub(crate) fn collect_local_server_status() -> ServerStatus {
     let os = std::env::consts::OS;
 
     let hostname = std::env::var("HOSTNAME")
         .ok()
-        .or_else(|| std::env::var("COMPUTERNAME").ok())
         .or_else(|| run_command_output("hostname", &[]).map(|s| s.trim().to_string()))
         .unwrap_or_else(|| "localhost".to_string());
 
@@ -1379,50 +1328,6 @@ pub(crate) fn collect_local_server_status() -> ServerStatus {
                 disks = parse_disk_info(&df_output);
             }
         }
-        "windows" => {
-            if let Some(mem_output) = run_command_output(
-                "wmic",
-                &[
-                    "OS",
-                    "get",
-                    "FreePhysicalMemory,TotalVisibleMemorySize",
-                    "/value",
-                ],
-            ) {
-                let free_kb = parse_wmic_value(&mem_output, "FreePhysicalMemory").unwrap_or(0);
-                let total_kb = parse_wmic_value(&mem_output, "TotalVisibleMemorySize").unwrap_or(0);
-                let free = free_kb.saturating_mul(1024);
-                let total = total_kb.saturating_mul(1024);
-                let used = total.saturating_sub(free);
-                let usage_percent = if total > 0 {
-                    (used as f64 / total as f64) * 100.0
-                } else {
-                    0.0
-                };
-
-                memory = MemoryInfo {
-                    total,
-                    used,
-                    free,
-                    available: free,
-                    usage_percent,
-                    swap_total: 0,
-                    swap_used: 0,
-                };
-            }
-
-            if let Some(disk_output) = run_command_output(
-                "wmic",
-                &[
-                    "logicaldisk",
-                    "get",
-                    "DeviceID,FileSystem,FreeSpace,Size",
-                    "/format:csv",
-                ],
-            ) {
-                disks = parse_disk_info_windows(&disk_output);
-            }
-        }
         _ => {}
     }
 
@@ -1465,8 +1370,8 @@ pub async fn get_server_status(
         .ok_or_else(|| "Server Performance plugin is not enabled".to_string())?;
 
     // Local shell sessions are not SSH-backed; collect metrics directly from
-    // this machine. The scrape spawns subprocesses (`df`, `sysctl`, `vm_stat`,
-    // `wmic`), so keep the blocking IO off the async runtime.
+    // this machine. The scrape spawns subprocesses (`df`, `sysctl`, `vm_stat`),
+    // so keep the blocking IO off the async runtime.
     if local_shell_manager
         .get_session(&request.session_id)
         .await
@@ -2009,66 +1914,6 @@ Pages speculative: 512
             parse_remote_session_state("Connected"),
             crate::session::SessionState::Connecting
         );
-    }
-
-    // =========================================================================
-    // parse_wmic_value / parse_disk_info_windows (Windows WMIC output)
-    // =========================================================================
-
-    #[test]
-    fn wmic_value_parses_value_output() {
-        let output = "\r\nTotalVisibleMemorySize=16648576\r\nFreePhysicalMemory=6904252\r\n";
-        assert_eq!(
-            parse_wmic_value(output, "FreePhysicalMemory"),
-            Some(6904252)
-        );
-        assert_eq!(
-            parse_wmic_value(output, "TotalVisibleMemorySize"),
-            Some(16648576)
-        );
-    }
-
-    #[test]
-    fn wmic_value_returns_none_for_missing_or_non_numeric_keys() {
-        let output = "FreePhysicalMemory=6904252\n";
-        assert_eq!(parse_wmic_value(output, "Missing"), None);
-        assert_eq!(
-            parse_wmic_value("FreePhysicalMemory=abc\n", "FreePhysicalMemory"),
-            None
-        );
-        assert_eq!(parse_wmic_value("", "FreePhysicalMemory"), None);
-    }
-
-    #[test]
-    fn windows_disk_info_parses_csv_output() {
-        let csv_output = "\
-Node,DeviceID,FileSystem,FreeSpace,Size
-
-,C:,NTFS,50191482880,254722007040
-,D:,FAT32,1234567,8388608
-";
-        let disks = parse_disk_info_windows(csv_output);
-
-        assert_eq!(disks.len(), 2);
-        assert_eq!(disks[0].mount_point, "C:");
-        assert_eq!(disks[0].filesystem, "NTFS");
-        assert_eq!(disks[0].total, 254722007040);
-        assert_eq!(disks[0].available, 50191482880);
-        assert_eq!(disks[0].used, 254722007040 - 50191482880);
-        assert_close(disks[0].usage_percent, 80.2956);
-        assert_eq!(disks[1].mount_point, "D:");
-        assert_eq!(disks[1].used, 8388608 - 1234567);
-        assert_close(disks[1].usage_percent, 85.2828);
-    }
-
-    #[test]
-    fn windows_disk_info_skips_headers_and_short_rows() {
-        assert!(parse_disk_info_windows("Node,DeviceID,FileSystem,FreeSpace,Size\n\n").is_empty());
-        assert!(parse_disk_info_windows(",C:,NTFS\n").is_empty());
-        // Zero-size drive must not divide by zero.
-        let disks = parse_disk_info_windows(",E:,FAT32,0,0\n");
-        assert_eq!(disks.len(), 1);
-        assert_close(disks[0].usage_percent, 0.0);
     }
 
     // =========================================================================

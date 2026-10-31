@@ -1,11 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { getCommandSuggestions, getCompletionQuery, getHistorySuggestions } from './completionData';
 import type { CompletionItem, CompletionType } from './CompletionPopup';
-import {
-  isAiPredictionReady,
-  predictCommandSuffix,
-  type AiPredictionSettings,
-} from '../../lib/aiCommandPrediction';
 
 const MAX_HISTORY_SIZE = 500;
 const HISTORY_STORAGE_KEY = 'zxyssh_command_history';
@@ -179,10 +174,7 @@ function getEnvVarSuggestions(input: string, maxResults = 5): CompletionItem[] {
     }));
 }
 
-export function useCompletion(
-  aiPredictionSettings?: AiPredictionSettings,
-  historyScope = 'global'
-): [CompletionState, CompletionActions] {
+export function useCompletion(historyScope = 'global'): [CompletionState, CompletionActions] {
   const [visible, setVisible] = useState(false);
   const [items, setItems] = useState<CompletionItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -193,11 +185,6 @@ export function useCompletion(
 
   const historyRef = useRef<string[]>(loadHistory(historyScope));
   const historyScopeRef = useRef(historyScope);
-  const aiPredictionSettingsRef = useRef(aiPredictionSettings);
-  const aiPredictionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const aiPredictionAbortRef = useRef<AbortController | null>(null);
-  const aiPredictionRequestIdRef = useRef(0);
-  const latestInputRef = useRef('');
 
   // Debounce refs for local completion (autoTrigger/updateCompletions).
   // Pending calls are guarded by a monotonically increasing request id, so a
@@ -221,23 +208,6 @@ export function useCompletion(
     };
   }, []);
 
-  useEffect(() => {
-    aiPredictionSettingsRef.current = aiPredictionSettings;
-  }, [aiPredictionSettings]);
-
-  const cancelAiPrediction = useCallback(() => {
-    aiPredictionRequestIdRef.current++;
-
-    if (aiPredictionTimerRef.current) {
-      clearTimeout(aiPredictionTimerRef.current);
-      aiPredictionTimerRef.current = null;
-    }
-
-    if (aiPredictionAbortRef.current) {
-      aiPredictionAbortRef.current.abort();
-      aiPredictionAbortRef.current = null;
-    }
-  }, []);
 
   // Cancel any pending debounced local completion (autoTrigger/updateCompletions).
   // Called synchronously from hideCompletions/clearGhostText so ESC/Enter/Tab
@@ -251,7 +221,6 @@ export function useCompletion(
     }
   }, []);
 
-  useEffect(() => cancelAiPrediction, [cancelAiPrediction]);
 
   const generateCompletions = useCallback((input: string): CompletionItem[] => {
     const trimmedInput = input.trim();
@@ -339,59 +308,10 @@ export function useCompletion(
     return '';
   }, []);
 
-  const scheduleAiPrediction = useCallback((input: string, localCompletions: CompletionItem[]) => {
-    const settings = aiPredictionSettingsRef.current;
-    latestInputRef.current = input;
-
-    if (!settings || !isAiPredictionReady(settings) || input.trim().length < settings.minChars) {
-      cancelAiPrediction();
-      return;
-    }
-
-    cancelAiPrediction();
-
-    const requestId = ++aiPredictionRequestIdRef.current;
-    const controller = new AbortController();
-    aiPredictionAbortRef.current = controller;
-
-    aiPredictionTimerRef.current = setTimeout(async () => {
-      aiPredictionTimerRef.current = null;
-
-      try {
-        const suffix = await predictCommandSuffix(
-          settings,
-          {
-            input,
-            history: historyRef.current,
-            localSuggestions: localCompletions.map((item) => item.text),
-          },
-          controller.signal
-        );
-
-        if (
-          requestId === aiPredictionRequestIdRef.current &&
-          latestInputRef.current === input &&
-          suffix
-        ) {
-          setGhostText(suffix);
-        }
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          console.debug('[Completion] AI prediction skipped:', error);
-        }
-      } finally {
-        if (aiPredictionAbortRef.current === controller) {
-          aiPredictionAbortRef.current = null;
-        }
-      }
-    }, settings.debounceMs);
-  }, [cancelAiPrediction]);
 
   const showCompletions = useCallback((input: string, pos: { x: number; y: number }) => {
     const completions = generateCompletions(input);
     const ghost = calculateLocalGhostText(input);
-    latestInputRef.current = input;
-    scheduleAiPrediction(input, completions);
 
     if (completions.length > 0) {
       setItems(completions);
@@ -405,7 +325,7 @@ export function useCompletion(
       setVisible(false);
       setGhostText(ghost);
     }
-  }, [generateCompletions, calculateLocalGhostText, scheduleAiPrediction]);
+  }, [generateCompletions, calculateLocalGhostText]);
 
   // Synchronous implementation of autoTrigger. Wrapped by the debounced
   // autoTrigger below so the heavy generateCompletions/calculateLocalGhostText
@@ -417,7 +337,6 @@ export function useCompletion(
       setVisible(false);
       setItems([]);
       setGhostText('');
-      cancelAiPrediction();
       return;
     }
 
@@ -431,8 +350,7 @@ export function useCompletion(
     setSelectedIndex(0);
     setPosition(pos);
     setVisible(completions.length > 0);
-    scheduleAiPrediction(input, completions);
-  }, [generateCompletions, calculateLocalGhostText, scheduleAiPrediction, cancelAiPrediction]);
+  }, [generateCompletions, calculateLocalGhostText]);
 
   const autoTrigger = useCallback((input: string, pos: { x: number; y: number }) => {
     // Short input clears synchronously (cheap, and keeps the popup responsive
@@ -458,8 +376,6 @@ export function useCompletion(
   const performUpdateCompletions = useCallback((input: string) => {
     const completions = generateCompletions(input);
     const ghost = calculateLocalGhostText(input);
-    latestInputRef.current = input;
-    scheduleAiPrediction(input, completions);
 
     if (completions.length > 0) {
       setItems(completions);
@@ -472,7 +388,7 @@ export function useCompletion(
       setItems([]);
       setGhostText(ghost);
     }
-  }, [generateCompletions, calculateLocalGhostText, scheduleAiPrediction]);
+  }, [generateCompletions, calculateLocalGhostText]);
 
   const updateCompletions = useCallback((input: string) => {
     cancelPendingLocalCompletion();
@@ -491,14 +407,12 @@ export function useCompletion(
     setItems([]);
     setSelectedIndex(0);
     setGhostText('');
-    cancelAiPrediction();
-  }, [cancelAiPrediction, cancelPendingLocalCompletion]);
+  }, [cancelPendingLocalCompletion]);
 
   const clearGhostText = useCallback(() => {
     cancelPendingLocalCompletion();
     setGhostText('');
-    cancelAiPrediction();
-  }, [cancelAiPrediction, cancelPendingLocalCompletion]);
+  }, [cancelPendingLocalCompletion]);
 
   const getGhostText = useCallback(() => ghostText, [ghostText]);
 

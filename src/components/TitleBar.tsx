@@ -154,7 +154,7 @@ export const TitleBar = memo(function TitleBar({
       </button>
     </div>
   ) : (
-    <div className={cn('window-controls-desktop', platform === 'windows' ? 'is-windows' : 'is-linux')}>
+    <div className="window-controls-desktop is-linux">
       <button className="window-control-desktop" onClick={handleMinimize} aria-label="Minimize">
         <Minus aria-hidden="true" />
       </button>

@@ -1,30 +1,24 @@
 import { create } from 'zustand';
 import { safeInvoke } from '../lib/tauri';
 
-export type RuntimePlatform = 'macos' | 'windows' | 'linux' | 'ios' | 'android' | 'unknown';
+export type RuntimePlatform = 'macos' | 'linux' | 'unknown';
 
 export interface RuntimeCapabilities {
   readonly platform: RuntimePlatform;
-  readonly isMobile: boolean;
   readonly windowControls: boolean;
   readonly localShell: boolean;
   readonly agentGateway: boolean;
   readonly desktopUpdater: boolean;
-  readonly cliIpc: boolean;
   readonly directoryTransfer: boolean;
-  readonly backgroundTunnels: boolean;
 }
 
 export const WEB_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   platform: 'unknown',
-  isMobile: false,
   windowControls: false,
   localShell: false,
   agentGateway: false,
   desktopUpdater: false,
-  cliIpc: false,
   directoryTransfer: false,
-  backgroundTunnels: false,
 });
 
 export async function fetchRuntimeCapabilities(): Promise<RuntimeCapabilities> {

@@ -11,24 +11,13 @@ import {
   type CursorStyle,
   type ThemeName,
 } from '../../stores/settingsStore';
-import {
-  getDefaultAiBaseUrl,
-  getDefaultAiModel,
-  type AiPredictionProvider,
-} from '../../lib/aiCommandPrediction';
 import { useFingerprintStore } from '../../stores/fingerprintStore';
 import { useUpdateStore } from '../../stores/updateStore';
 import { useRuntimeCapabilitiesStore } from '../../stores/runtimeCapabilitiesStore';
-import {
-  useCloudSyncStore,
-  type CloudSyncProvider,
-  type CreateCloudSyncVaultInput,
-} from '../../stores/cloudSyncStore';
 import { IntegrationCard } from './IntegrationCard';
 import { CustomThemeEditor } from './CustomThemeEditor';
 import { AgentPairingPanel } from '../AgentPairingPanel';
 import {
-  Monitor,
   Palette,
   Terminal,
   Plug,
@@ -38,22 +27,10 @@ import {
   Github,
   Shield,
   Key,
-  Video,
-  Trash2,
   FolderOpen,
-  Sparkles,
-  Eye,
-  EyeOff,
   Bot,
   RefreshCw,
-  Cloud,
-  Copy,
-  LockKeyhole,
-  FileDown,
-  FileUp,
 } from 'lucide-react';
-import { useRecordingStore } from '../../stores/recordingStore';
-import type { Recording } from '../../types/tunnel';
 import { safeInvoke } from '../../lib/tauri';
 
 // ============================================================================
@@ -198,95 +175,6 @@ function Toggle({ checked, onChange }: ToggleProps) {
   );
 }
 
-interface NumberInputProps {
-  value: number;
-  min?: number;
-  max?: number;
-  onChange: (value: number) => void;
-  placeholder?: string;
-  suffix?: string;
-}
-
-/**
- * A styled number input.
- */
-function NumberInput({ value, min, max, onChange, placeholder, suffix }: NumberInputProps) {
-  return (
-    <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-      <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => onChange(Number(e.target.value))}
-        placeholder={placeholder}
-        className="min-w-0 flex-1 px-3 py-2 rounded-md bg-tokyo-bg-hl border border-tokyo-bg-hl sm:w-24 sm:flex-none
-                   text-tokyo-fg text-sm font-mono
-                   focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue
-                   hover:border-tokyo-comment transition-colors"
-      />
-      {suffix && <span className="text-tokyo-comment text-sm">{suffix}</span>}
-    </div>
-  );
-}
-
-interface TextInputProps {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  type?: 'text' | 'password' | 'url';
-  className?: string;
-}
-
-/**
- * A styled text input.
- */
-function TextInput({ value, onChange, placeholder, type = 'text', className = 'sm:w-48' }: TextInputProps) {
-  return (
-    <input
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={`w-full max-w-full ${className} px-3 py-2 rounded-md bg-tokyo-bg-hl border border-tokyo-bg-hl
-                 text-tokyo-fg text-sm
-                 focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue
-                 hover:border-tokyo-comment transition-colors
-                 placeholder:text-tokyo-comment`}
-    />
-  );
-}
-
-function SecretInput({ value, onChange, placeholder }: TextInputProps) {
-  const [visible, setVisible] = useState(false);
-
-  return (
-    <div className="relative w-full sm:w-80">
-      <input
-        type={visible ? 'text' : 'password'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full pl-3 pr-10 py-2 rounded-md bg-tokyo-bg-hl border border-tokyo-bg-hl
-                   text-tokyo-fg text-sm
-                   focus:outline-none focus:ring-1 focus:ring-tokyo-blue focus:border-tokyo-blue
-                   hover:border-tokyo-comment transition-colors
-                   placeholder:text-tokyo-comment"
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((current) => !current)}
-        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md
-                   text-tokyo-comment hover:text-tokyo-fg hover:bg-tokyo-selection/40
-                   transition-colors"
-        aria-label={visible ? 'Hide API key' : 'Show API key'}
-      >
-        {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-      </button>
-    </div>
-  );
-}
-
 interface TextAreaProps {
   value: string;
   onChange: (value: string) => void;
@@ -393,85 +281,6 @@ function SecuritySection() {
           <span>{t('settings.manageHostKeys')}</span>
         </button>
       </SettingRow>
-    </SettingsSection>
-  );
-}
-
-// ============================================================================
-// Session Recording Section Component
-// ============================================================================
-
-function RecordingSection() {
-  const { t } = useTranslation();
-  const { recordings, fetchRecordings, deleteRecording } = useRecordingStore();
-
-  useEffect(() => {
-    fetchRecordings();
-  }, [fetchRecordings]);
-
-  const formatDate = (ts: number) => {
-    return new Date(ts * 1000).toLocaleString();
-  };
-
-  const formatDuration = (rec: Recording) => {
-    if (!rec.endedAt) return t('settings.inProgress');
-    const secs = rec.endedAt - rec.startedAt;
-    const mins = Math.floor(secs / 60);
-    const hours = Math.floor(mins / 60);
-    if (hours > 0) return `${hours}h ${mins % 60}m`;
-    if (mins > 0) return `${mins}m ${secs % 60}s`;
-    return `${secs}s`;
-  };
-
-  return (
-    <SettingsSection
-      icon={<Video className="w-5 h-5" />}
-      title={t('settings.recording')}
-      description={t('settings.recordingDesc')}
-    >
-      <SettingRow
-        label={t('settings.storageLocation')}
-        description={t('settings.storageLocationDesc')}
-      >
-        <div className="flex min-w-0 items-start gap-2 text-sm text-tokyo-comment font-mono sm:items-center">
-          <FolderOpen className="w-4 h-4 flex-shrink-0" />
-          <span className="break-all">%APPDATA%/zxyssh/recordings</span>
-        </div>
-      </SettingRow>
-
-      <div className="mt-4">
-        <h3 className="text-tokyo-fg font-medium mb-3">
-          {t('settings.recordedSessions', { count: recordings.length })}
-        </h3>
-        {recordings.length === 0 ? (
-          <p className="text-tokyo-comment text-sm py-4 text-center">
-            {t('settings.noRecordings')}
-          </p>
-        ) : (
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {recordings.map((rec) => (
-              <div
-                key={rec.id}
-                className="flex min-w-0 items-center justify-between gap-2 p-3 rounded-md bg-tokyo-bg-dark border border-tokyo-bg-hl"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-tokyo-fg truncate">{rec.filePath.split(/[/\\]/).pop()}</div>
-                  <div className="text-xs text-tokyo-comment mt-0.5">
-                    {formatDate(rec.startedAt)} &middot; {formatDuration(rec)}
-                  </div>
-                </div>
-                <button
-                  onClick={() => deleteRecording(rec.id)}
-                  className="flex-shrink-0 p-1.5 rounded-md text-tokyo-comment hover:text-tokyo-red hover:bg-tokyo-red/10 transition-colors"
-                  title={t('settings.deleteRecording')}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </SettingsSection>
   );
 }
@@ -615,8 +424,6 @@ export function Settings() {
     uninstallFrom,
     updateTerminalSettings,
     updateAppearanceSettings,
-    updateSshDefaultSettings,
-    updateAiPredictionSettings,
     updateUploadIgnoreConfig,
     resetSettings,
   } = useSettingsStore();
@@ -635,31 +442,8 @@ export function Settings() {
   } = useUpdateStore();
   const runtimeCapabilities = useRuntimeCapabilitiesStore((state) => state.capabilities);
   const loadRuntimeCapabilities = useRuntimeCapabilitiesStore((state) => state.load);
-  const {
-    status: cloudSyncStatus,
-    pairingInfo: cloudPairingInfo,
-    report: cloudSyncReport,
-    fileReport: cloudSyncFileReport,
-    loading: cloudSyncLoading,
-    error: cloudSyncError,
-    refreshStatus: refreshCloudSyncStatus,
-    createVault: createCloudSyncVault,
-    joinVault: joinCloudSyncVault,
-    syncNow: syncCloudNow,
-    lock: lockCloudSync,
-    exportFile: exportCloudSyncFile,
-    importFile: importCloudSyncFile,
-  } = useCloudSyncStore();
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [cloudProvider, setCloudProvider] = useState<CloudSyncProvider>('github_gist');
-  const [cloudWebDavEndpoint, setCloudWebDavEndpoint] = useState('');
-  const [cloudGistId, setCloudGistId] = useState('');
-  const [cloudToken, setCloudToken] = useState('');
-  const [cloudWebDavUsername, setCloudWebDavUsername] = useState('');
-  const [cloudWebDavPassword, setCloudWebDavPassword] = useState('');
-  const [cloudPairingCode, setCloudPairingCode] = useState('');
-  const [pairingCodeCopied, setPairingCodeCopied] = useState(false);
   const [uploadExcludeText, setUploadExcludeText] = useState(
     uploadIgnoreConfig.excludedPaths.join('\n')
   );
@@ -668,14 +452,13 @@ export function Settings() {
   useEffect(() => {
     void initializeSettings();
     void fetchAppVersion();
-    void refreshCloudSyncStatus();
     void loadRuntimeCapabilities().then((capabilities) => {
       if (capabilities.agentGateway) {
         void fetchAiTools();
         void fetchGatewayStatus();
       }
     });
-  }, [initializeSettings, fetchAiTools, fetchGatewayStatus, fetchAppVersion, loadRuntimeCapabilities, refreshCloudSyncStatus]);
+  }, [initializeSettings, fetchAiTools, fetchGatewayStatus, fetchAppVersion, loadRuntimeCapabilities]);
 
   useEffect(() => {
     setUploadExcludeText(uploadIgnoreConfig.excludedPaths.join('\n'));
@@ -701,56 +484,6 @@ export function Settings() {
         .map((value) => value.trim())
         .filter(Boolean),
     });
-  };
-
-  const handleAiProviderChange = (provider: AiPredictionProvider) => {
-    updateAiPredictionSettings({
-      provider,
-      baseUrl: getDefaultAiBaseUrl(provider),
-      model: getDefaultAiModel(provider),
-    });
-  };
-
-  const handleCreateCloudVault = async () => {
-    let input: CreateCloudSyncVaultInput;
-    if (cloudProvider === 'github_gist') {
-      input = {
-        provider: cloudProvider,
-        gistId: cloudGistId.trim() || undefined,
-        token: cloudToken,
-      };
-    } else {
-      input = {
-        provider: cloudProvider,
-        endpoint: cloudWebDavEndpoint,
-        username: cloudWebDavUsername,
-        password: cloudWebDavPassword,
-      };
-    }
-    const created = await createCloudSyncVault(input);
-    if (created) {
-      setCloudToken('');
-      setCloudWebDavPassword('');
-    }
-    setPairingCodeCopied(false);
-  };
-
-  const canCreateCloudVault =
-    cloudProvider === 'github_gist'
-      ? Boolean(cloudToken.trim())
-      : Boolean(cloudWebDavEndpoint.trim());
-
-  const handleJoinCloudVault = async () => {
-    const joined = await joinCloudSyncVault(cloudPairingCode);
-    if (joined) {
-      setCloudPairingCode('');
-    }
-  };
-
-  const handleCopyPairingCode = async () => {
-    if (!cloudPairingInfo) return;
-    await navigator.clipboard.writeText(cloudPairingInfo.pairingCode);
-    setPairingCodeCopied(true);
   };
 
   const effectiveAppVersion = appVersion ?? checkedCurrentVersion;
@@ -859,332 +592,6 @@ export function Settings() {
       </SettingsSection>
 
       {/* ================================================================== */}
-      {/* Cloud Sync Section */}
-      {/* ================================================================== */}
-      <SettingsSection
-        icon={<Cloud className="w-5 h-5" />}
-        title={t('settings.cloudSync')}
-        description={t('settings.cloudSyncDesc')}
-      >
-        {cloudSyncError && (
-          <div className="border-y border-tokyo-red/30 bg-tokyo-red/10 px-3 py-2 text-sm text-tokyo-red">
-            {cloudSyncError}
-          </div>
-        )}
-
-        {cloudSyncStatus.unlocked ? (
-          <>
-            <SettingRow label={t('settings.cloudSyncStatus')}>
-              <div className="flex min-w-0 items-center gap-2 text-sm text-tokyo-fg">
-                <span className="h-2 w-2 flex-shrink-0 rounded-full bg-tokyo-green" />
-                <span>{cloudSyncStatus.syncing ? t('settings.cloudSyncing') : t('settings.cloudUnlocked')}</span>
-              </div>
-            </SettingRow>
-            <SettingRow label={t('settings.cloudVault')}>
-              <div className="max-w-full text-right text-xs text-tokyo-comment sm:max-w-sm">
-                <div className="text-tokyo-fg">
-                  {t(`settings.cloudProvider_${cloudSyncStatus.provider ?? 'github_gist'}`)}
-                </div>
-                <div className="break-all font-mono text-tokyo-fg">{cloudSyncStatus.vaultId}</div>
-                <div className="break-all">{cloudSyncStatus.endpoint}</div>
-              </div>
-            </SettingRow>
-            <SettingRow label={t('settings.cloudPending')}>
-              <span className="font-mono text-sm text-tokyo-fg">{cloudSyncStatus.pendingChanges}</span>
-            </SettingRow>
-            <SettingRow label={t('settings.cloudConflicts')}>
-              <span className={`font-mono text-sm ${cloudSyncStatus.conflicts > 0 ? 'text-tokyo-yellow' : 'text-tokyo-fg'}`}>
-                {cloudSyncStatus.conflicts}
-              </span>
-            </SettingRow>
-            <SettingRow label={t('settings.cloudLastSync')}>
-              <span className="text-sm text-tokyo-comment">
-                {cloudSyncStatus.lastSuccessAt
-                  ? new Date(cloudSyncStatus.lastSuccessAt * 1000).toLocaleString(i18n.language)
-                  : t('settings.cloudNeverSynced')}
-              </span>
-            </SettingRow>
-
-            {cloudPairingInfo && (
-              <div className="space-y-2 border-y border-tokyo-yellow/30 bg-tokyo-yellow/10 px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <label htmlFor="cloudPairingOutput" className="text-sm font-medium text-tokyo-fg">
-                    {t('settings.cloudPairingCode')}
-                  </label>
-                  <button
-                    type="button"
-                    className="icon-button tooltip-button"
-                    data-tooltip={pairingCodeCopied ? t('settings.cloudCopied') : t('settings.cloudCopyPairing')}
-                    aria-label={pairingCodeCopied ? t('settings.cloudCopied') : t('settings.cloudCopyPairing')}
-                    onClick={handleCopyPairingCode}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </button>
-                </div>
-                <textarea
-                  id="cloudPairingOutput"
-                  readOnly
-                  value={cloudPairingInfo.pairingCode}
-                  rows={3}
-                  spellCheck={false}
-                  className="w-full resize-none rounded-md border border-tokyo-bg-hl bg-tokyo-bg px-3 py-2 font-mono text-xs text-tokyo-fg focus:outline-none focus:ring-1 focus:ring-tokyo-yellow"
-                />
-                <p className="text-xs text-tokyo-yellow">{t('settings.cloudPairingCodeWarning')}</p>
-              </div>
-            )}
-
-            {cloudSyncReport && (
-              <p className="text-xs text-tokyo-comment">
-                {t('settings.cloudSyncReport', {
-                  uploaded: cloudSyncReport.uploaded,
-                  downloaded: cloudSyncReport.downloaded,
-                  conflicts: cloudSyncReport.conflicts,
-                })}
-              </p>
-            )}
-
-            <div className="flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => void lockCloudSync()}
-                disabled={cloudSyncLoading}
-                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-tokyo-bg-hl px-3 py-2 text-sm text-tokyo-fg transition-colors hover:bg-tokyo-bg-hl disabled:opacity-50"
-              >
-                <LockKeyhole className="h-4 w-4" />
-                {t('settings.cloudLock')}
-              </button>
-              <button
-                type="button"
-                onClick={() => void syncCloudNow()}
-                disabled={cloudSyncLoading || cloudSyncStatus.syncing}
-                className="inline-flex min-h-10 items-center gap-2 rounded-md bg-tokyo-blue px-3 py-2 text-sm text-tokyo-on-accent transition-colors hover:bg-tokyo-blue/80 disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 ${cloudSyncLoading || cloudSyncStatus.syncing ? 'animate-spin' : ''}`} />
-                {t('settings.cloudSyncNow')}
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <SettingRow label={t('settings.cloudProvider')}>
-              <Select
-                value={cloudProvider}
-                options={[
-                  { value: 'github_gist', label: t('settings.cloudProvider_github_gist') },
-                  { value: 'webdav', label: t('settings.cloudProvider_webdav') },
-                ]}
-                onChange={setCloudProvider}
-              />
-            </SettingRow>
-
-            {cloudProvider === 'github_gist' && (
-              <>
-                <SettingRow
-                  label={t('settings.cloudGistId')}
-                  description={t('settings.cloudGistIdDesc')}
-                >
-                  <TextInput
-                    value={cloudGistId}
-                    onChange={setCloudGistId}
-                    placeholder="https://gist.github.com/user/id"
-                    className="sm:w-80"
-                  />
-                </SettingRow>
-                <SettingRow
-                  label={t('settings.cloudGithubToken')}
-                  description={t('settings.cloudGithubTokenDesc')}
-                >
-                  <SecretInput
-                    value={cloudToken}
-                    onChange={setCloudToken}
-                    placeholder="github_pat_..."
-                  />
-                </SettingRow>
-              </>
-            )}
-
-            {cloudProvider === 'webdav' && (
-              <>
-                <SettingRow
-                  label={t('settings.cloudWebDavEndpoint')}
-                  description={t('settings.cloudWebDavEndpointDesc')}
-                >
-                  <TextInput
-                    value={cloudWebDavEndpoint}
-                    onChange={setCloudWebDavEndpoint}
-                    placeholder="https://dav.example.com/zxyssh-sync.json"
-                    className="sm:w-80"
-                  />
-                </SettingRow>
-                <SettingRow label={t('settings.cloudWebDavUsername')}>
-                  <TextInput
-                    value={cloudWebDavUsername}
-                    onChange={setCloudWebDavUsername}
-                    placeholder={t('settings.cloudOptional')}
-                    className="sm:w-80"
-                  />
-                </SettingRow>
-                <SettingRow label={t('settings.cloudWebDavPassword')}>
-                  <SecretInput
-                    value={cloudWebDavPassword}
-                    onChange={setCloudWebDavPassword}
-                    placeholder={t('settings.cloudOptional')}
-                  />
-                </SettingRow>
-              </>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => void handleCreateCloudVault()}
-                disabled={cloudSyncLoading || !canCreateCloudVault}
-                className="inline-flex min-h-10 items-center gap-2 rounded-md bg-tokyo-blue px-3 py-2 text-sm text-tokyo-on-accent transition-colors hover:bg-tokyo-blue/80 disabled:opacity-50"
-              >
-                <Cloud className="h-4 w-4" />
-                {t('settings.cloudCreateVault')}
-              </button>
-            </div>
-            <SettingRow label={t('settings.cloudPairingCode')}>
-              <TextArea
-                value={cloudPairingCode}
-                onChange={setCloudPairingCode}
-                placeholder="zxyssh-sync-v2..."
-              />
-            </SettingRow>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => void handleJoinCloudVault()}
-                disabled={cloudSyncLoading || !cloudPairingCode.trim()}
-                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-tokyo-blue px-3 py-2 text-sm text-tokyo-blue transition-colors hover:bg-tokyo-blue/10 disabled:opacity-50"
-              >
-                <Key className="h-4 w-4" />
-                {t('settings.cloudJoinVault')}
-              </button>
-            </div>
-          </>
-        )}
-
-        {runtimeCapabilities.directoryTransfer && (
-          <div className="space-y-3 border-t border-tokyo-bg-hl pt-4">
-            <div>
-              <h3 className="text-sm font-medium text-tokyo-fg">{t('settings.cloudPortableFile')}</h3>
-              <p className="mt-1 text-xs text-tokyo-comment">{t('settings.cloudPortableFileDesc')}</p>
-            </div>
-            {cloudSyncFileReport && (
-              <p className="break-all text-xs text-tokyo-comment">
-                {cloudSyncFileReport.operation === 'export'
-                  ? t('settings.cloudFileExportReport', {
-                      count: cloudSyncFileReport.exported,
-                      path: cloudSyncFileReport.path,
-                    })
-                  : t('settings.cloudFileImportReport', {
-                      applied: cloudSyncFileReport.applied,
-                      ignored: cloudSyncFileReport.ignored,
-                      conflicts: cloudSyncFileReport.conflicts,
-                      path: cloudSyncFileReport.path,
-                    })}
-              </p>
-            )}
-            <div className="flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => void importCloudSyncFile()}
-                disabled={cloudSyncLoading}
-                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-tokyo-blue px-3 py-2 text-sm text-tokyo-blue transition-colors hover:bg-tokyo-blue/10 disabled:opacity-50"
-              >
-                <FileUp className="h-4 w-4" />
-                {t('settings.cloudImportFile')}
-              </button>
-              <button
-                type="button"
-                onClick={() => void exportCloudSyncFile()}
-                disabled={cloudSyncLoading}
-                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-tokyo-bg-hl px-3 py-2 text-sm text-tokyo-fg transition-colors hover:bg-tokyo-bg-hl disabled:opacity-50"
-              >
-                <FileDown className="h-4 w-4" />
-                {t('settings.cloudExportFile')}
-              </button>
-            </div>
-          </div>
-        )}
-      </SettingsSection>
-
-      {/* ================================================================== */}
-      {/* AI Command Prediction Section */}
-      {/* ================================================================== */}
-      <SettingsSection
-        icon={<Sparkles className="w-5 h-5" />}
-        title={t('settings.aiPrediction')}
-        description={t('settings.aiPredictionDesc')}
-      >
-        <SettingRow label={t('settings.aiPredictionEnabled')} description={t('settings.aiPredictionEnabledDesc')}>
-          <Toggle
-            checked={settings.aiPrediction.enabled}
-            onChange={(enabled) => updateAiPredictionSettings({ enabled })}
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.aiPredictionProvider')} description={t('settings.aiPredictionProviderDesc')}>
-          <Select<AiPredictionProvider>
-            value={settings.aiPrediction.provider}
-            options={[
-              { value: 'openai', label: t('settings.aiPredictionProviders.openai') },
-              { value: 'claude', label: t('settings.aiPredictionProviders.claude') },
-            ]}
-            onChange={handleAiProviderChange}
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.aiPredictionApiKey')} description={t('settings.aiPredictionApiKeyDesc')}>
-          <SecretInput
-            value={settings.aiPrediction.apiKey}
-            onChange={(apiKey) => updateAiPredictionSettings({ apiKey })}
-            placeholder={settings.aiPrediction.provider === 'claude' ? 'sk-ant-...' : 'sk-...'}
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.aiPredictionBaseUrl')} description={t('settings.aiPredictionBaseUrlDesc')}>
-          <TextInput
-            type="url"
-            value={settings.aiPrediction.baseUrl}
-            onChange={(baseUrl) => updateAiPredictionSettings({ baseUrl })}
-            placeholder={getDefaultAiBaseUrl(settings.aiPrediction.provider)}
-            className="sm:w-80"
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.aiPredictionModel')} description={t('settings.aiPredictionModelDesc')}>
-          <TextInput
-            value={settings.aiPrediction.model}
-            onChange={(model) => updateAiPredictionSettings({ model })}
-            placeholder={getDefaultAiModel(settings.aiPrediction.provider)}
-            className="sm:w-64"
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.aiPredictionMinChars')} description={t('settings.aiPredictionMinCharsDesc')}>
-          <NumberInput
-            value={settings.aiPrediction.minChars}
-            min={1}
-            max={20}
-            onChange={(minChars) => updateAiPredictionSettings({ minChars })}
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.aiPredictionDebounce')} description={t('settings.aiPredictionDebounceDesc')}>
-          <NumberInput
-            value={settings.aiPrediction.debounceMs}
-            min={150}
-            max={2000}
-            onChange={(debounceMs) => updateAiPredictionSettings({ debounceMs })}
-            suffix="ms"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      {/* ================================================================== */}
       {/* Appearance Settings Section */}
       {/* ================================================================== */}
       <SettingsSection
@@ -1249,17 +656,6 @@ export function Settings() {
 
         <CustomThemeEditor />
 
-        <SettingRow label={t('settings.windowOpacity')} description={t('settings.windowOpacityDesc')}>
-          <Slider
-            value={settings.appearance.windowOpacity}
-            min={0.5}
-            max={1.0}
-            step={0.05}
-            onChange={(windowOpacity) => updateAppearanceSettings({ windowOpacity })}
-            formatValue={(v) => `${Math.round(v * 100)}%`}
-          />
-        </SettingRow>
-
         <SettingRow label={t('settings.language')} description={t('settings.languageDesc')}>
           <Select<string>
             value={i18n.language.startsWith('zh') ? 'zh' : 'en'}
@@ -1268,52 +664,6 @@ export function Settings() {
               { value: 'zh', label: '简体中文' },
             ]}
             onChange={(lang) => i18n.changeLanguage(lang)}
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      {/* ================================================================== */}
-      {/* SSH Defaults Section */}
-      {/* ================================================================== */}
-      <SettingsSection
-        icon={<Monitor className="w-5 h-5" />}
-        title={t('settings.sshDefaults')}
-        description={t('settings.sshDefaultsDesc')}
-      >
-        <SettingRow label={t('settings.defaultPort')} description={t('settings.defaultPortDesc')}>
-          <NumberInput
-            value={settings.sshDefaults.defaultPort}
-            min={1}
-            max={65535}
-            onChange={(defaultPort) => updateSshDefaultSettings({ defaultPort })}
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.connectionTimeout')} description={t('settings.connectionTimeoutDesc')}>
-          <NumberInput
-            value={settings.sshDefaults.connectionTimeout}
-            min={5}
-            max={120}
-            onChange={(connectionTimeout) => updateSshDefaultSettings({ connectionTimeout })}
-            suffix="seconds"
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.keepaliveInterval')} description={t('settings.keepaliveIntervalDesc')}>
-          <NumberInput
-            value={settings.sshDefaults.keepaliveInterval}
-            min={0}
-            max={300}
-            onChange={(keepaliveInterval) => updateSshDefaultSettings({ keepaliveInterval })}
-            suffix="seconds"
-          />
-        </SettingRow>
-
-        <SettingRow label={t('settings.defaultUsername')} description={t('settings.defaultUsernameDesc')}>
-          <TextInput
-            value={settings.sshDefaults.defaultUsername}
-            onChange={(defaultUsername) => updateSshDefaultSettings({ defaultUsername })}
-            placeholder="e.g., root"
           />
         </SettingRow>
       </SettingsSection>
@@ -1365,11 +715,6 @@ export function Settings() {
       {/* Security Section */}
       {/* ================================================================== */}
       <SecuritySection />
-
-      {/* ================================================================== */}
-      {/* Session Recording Section */}
-      {/* ================================================================== */}
-      <RecordingSection />
 
       {/* ================================================================== */}
       {/* Agent Gateway Section */}

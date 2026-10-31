@@ -59,7 +59,7 @@ The UI should fetch inventory when the container panel opens, with refresh and v
 
 ## #12: outbound proxy support
 
-Issue: **upstream issues #12**. **Design only; proxy protocols are not implemented by this change.** Existing SSH SOCKS forwarding is a listener for traffic through an established SSH connection, not an outbound proxy setting.
+Issue: **upstream issues #12**. **Design only; proxy protocols are not implemented by this change.** SSH port forwarding has since been removed with the tunnel runtime, so there is no longer any forwarding listener to confuse with an outbound proxy setting.
 
 ### Scope and existing network paths
 

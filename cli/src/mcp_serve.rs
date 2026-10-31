@@ -8,9 +8,7 @@ use anyhow::{bail, Context, Result};
 use axum::Router;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use zxyssh_core::mcp::pairing::{
-    AgentSummary, IssuedAgent, PairRequestStatus, PairRequestSummary, PairingRegistry,
-};
+use zxyssh_core::mcp::pairing::{AgentSummary, IssuedAgent, PairingRegistry};
 use zxyssh_core::mcp::McpServer;
 use zxyssh_core::{Database, SessionManager};
 
@@ -103,22 +101,13 @@ pub fn serve() -> Result<()> {
         .active_agent_count();
     validate_listener(config.bind, active_agents, config.allow_lan)?;
 
-    let (approval_required, pending_requests) = {
-        let registry = lock(&registry)?;
-        (
-            registry.pairing_approval_required(),
-            registry.list_requests(unix_now()).len(),
-        )
-    };
     let status = zxyssh_core::mcp::lan_status::LanListenerStatus {
         bind: config.bind.to_string(),
         allow_lan: config.allow_lan,
         credential_sealing: true,
-        approval_required,
         pid: std::process::id(),
         started_at: unix_now(),
         active_agents,
-        pending_requests,
     };
     // A missing status file only costs the desktop a "not running" read, so this
     // never blocks the listener.
@@ -127,10 +116,6 @@ pub fn serve() -> Result<()> {
     }
 
     let session_manager = Arc::new(SessionManager::new(database.clone()));
-    session_manager.set_tunnel_manager(Arc::new(zxyssh_core::tunnel::TunnelManager::new()));
-    session_manager.set_session_logger(Arc::new(zxyssh_core::logging::SessionLogger::new(
-        database.clone(),
-    )));
     let app = build_router(database, session_manager, registry);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -216,45 +201,17 @@ pub enum McpCommand {
         #[command(subcommand)]
         command: CredentialCommand,
     },
-    /// List and decide pairing requests that are waiting for an operator
-    Requests {
-        #[command(subcommand)]
-        command: RequestsCommand,
-    },
-    /// Show or change whether pairing waits for an explicit approval
-    Approvals {
-        /// `on` keeps the approval queue, `off` issues credentials immediately
-        #[arg(long, value_name = "on|off")]
-        set: Option<String>,
-    },
     /// Pair this machine with a running listener, reading the code from stdin
     Pair {
         /// Listener URL, e.g. http://192.168.0.96:8765
         #[arg(long, default_value = "http://127.0.0.1:8765")]
         endpoint: String,
-        /// Name this Agent reports for the approval queue
+        /// Name this Agent reports to the service
         #[arg(long)]
         name: String,
-        /// Seconds to wait for an operator to approve
+        /// Seconds to wait for the sealed credential to be delivered
         #[arg(long, default_value_t = 900)]
         wait: u64,
-    },
-}
-
-/// `zxyssh mcp requests …` — the approval queue for a headless deployment.
-#[derive(clap::Subcommand)]
-pub enum RequestsCommand {
-    /// List requests an operator can still decide
-    List,
-    /// Issue the credential a request is waiting for
-    Approve {
-        /// Request id or unambiguous id prefix
-        request: String,
-    },
-    /// Refuse a request; the Agent needs a fresh pairing code
-    Reject {
-        /// Request id or unambiguous id prefix
-        request: String,
     },
 }
 
@@ -320,26 +277,6 @@ pub fn run(command: McpCommand) -> Result<()> {
                 bail!("Rename failed")
             }
         }
-        McpCommand::Requests { command } => requests(command),
-        McpCommand::Approvals { set } => match set.as_deref() {
-            Some(value) => {
-                let required = match value {
-                    "on" => true,
-                    "off" => false,
-                    other => bail!("--set must be `on` or `off`, got {other}"),
-                };
-                let now = set_approvals(required)?;
-                println!("Pairing now requires an operator approval: {now}");
-                Ok(())
-            }
-            None => {
-                println!(
-                    "Pairing requires an operator approval: {}",
-                    if approvals_required()? { "on" } else { "off" }
-                );
-                Ok(())
-            }
-        },
         McpCommand::Pair {
             endpoint,
             name,
@@ -507,101 +444,6 @@ pub fn rotate(reference: &str) -> Result<Option<IssuedAgent>> {
     registry
         .rotate(&id)
         .map_err(|error| anyhow::anyhow!("Could not persist the new credential: {error:?}"))
-}
-
-fn resolve_request(requests: &[PairRequestSummary], reference: &str) -> Result<String> {
-    let matches: Vec<&PairRequestSummary> = requests
-        .iter()
-        .filter(|request| request.id.starts_with(reference))
-        .collect();
-    match matches.len() {
-        1 => Ok(matches[0].id.clone()),
-        0 => bail!("No pending pairing request id starts with {reference}"),
-        count => bail!("{count} requests match {reference}; use a longer id prefix"),
-    }
-}
-
-fn status_label(status: PairRequestStatus) -> &'static str {
-    match status {
-        PairRequestStatus::AwaitingApproval => "awaiting",
-        PairRequestStatus::Approved => "approved",
-        PairRequestStatus::Rejected => "rejected",
-        PairRequestStatus::Delivered => "delivered",
-        PairRequestStatus::Expired => "expired",
-    }
-}
-
-fn requests(command: RequestsCommand) -> Result<()> {
-    match command {
-        RequestsCommand::List => {
-            let holder = registry(open_database()?)?;
-            let list = lock(&holder)?.list_requests(unix_now());
-            if list.is_empty() {
-                println!("No pairing requests are waiting.");
-                return Ok(());
-            }
-            for request in list {
-                println!(
-                    "{}  {}  from {}  {}",
-                    request.id,
-                    status_label(request.status),
-                    request.peer,
-                    request.agent_name
-                );
-            }
-            Ok(())
-        }
-        RequestsCommand::Approve { request } => {
-            let holder = registry(open_database()?)?;
-            let mut registry = lock(&holder)?;
-            let id = resolve_request(&registry.list_requests(unix_now()), &request)?;
-            let issued = registry
-                .approve_request(&id, unix_now())
-                .map_err(|error| anyhow::anyhow!("Could not persist the approval: {error:?}"))?;
-            match issued {
-                Some(agent) => {
-                    println!(
-                        "Approved. Agent {} can now fetch its credential.",
-                        agent.name
-                    );
-                    println!(
-                        "The Agent polls POST /pair/status with the request id; the token is                          never printed here."
-                    );
-                    Ok(())
-                }
-                None => bail!("That request is no longer awaiting approval"),
-            }
-        }
-        RequestsCommand::Reject { request } => {
-            let holder = registry(open_database()?)?;
-            let mut registry = lock(&holder)?;
-            let id = resolve_request(&registry.list_requests(unix_now()), &request)?;
-            if registry
-                .reject_request(&id)
-                .map_err(|error| anyhow::anyhow!("Could not persist the refusal: {error:?}"))?
-            {
-                println!("Rejected. That pairing code is spent; issue a new one.");
-                Ok(())
-            } else {
-                bail!("That request is no longer awaiting approval")
-            }
-        }
-    }
-}
-
-fn approvals_required() -> Result<bool> {
-    let holder = registry(open_database()?)?;
-    let registry = lock(&holder)?;
-    Ok(registry.pairing_approval_required())
-}
-
-fn set_approvals(required: bool) -> Result<bool> {
-    let holder = registry(open_database()?)?;
-    let mut registry = lock(&holder)?;
-    registry
-        .set_pairing_approval_required(required)
-        .map_err(|error| anyhow::anyhow!("Could not persist the approval mode: {error:?}"))?;
-    Ok(registry.pairing_approval_required())
 }
 
 /// Become an Agent of a running listener. The pairing code is read from stdin so

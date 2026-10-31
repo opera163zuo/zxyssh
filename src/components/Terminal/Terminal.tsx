@@ -231,7 +231,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       agentInputColorRef.current = (currentTheme ?? themes[0]).colors.magenta;
     }, [settings.appearance.theme]);
     const [completionState, completionActions] = useCompletion(
-      settings.aiPrediction,
       serverId ? `server:${serverId}` : 'global'
     );
 

@@ -58,39 +58,18 @@ fn capability_allows_localhost_dev_origins() {
 }
 
 #[test]
-fn capabilities_separate_desktop_and_mobile_permissions() {
+fn desktop_capability_list_stays_scoped_to_desktop_platforms_and_windows() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let desktop_path = manifest_dir.join("capabilities").join("default.json");
-    let mobile_path = manifest_dir.join("capabilities").join("mobile.json");
-    let desktop = read_json(&desktop_path);
-    let mobile = read_json(&mobile_path);
+    let desktop = read_json(&manifest_dir.join("capabilities").join("default.json"));
 
-    assert_eq!(
-        desktop["platforms"],
-        serde_json::json!(["linux", "macOS", "windows"])
-    );
-    assert_eq!(mobile["platforms"], serde_json::json!(["iOS", "android"]));
-
-    let mobile_permissions = mobile["permissions"]
+    assert_eq!(desktop["platforms"], serde_json::json!(["linux", "macOS"]));
+    let labels: Vec<&str> = desktop["windows"]
         .as_array()
-        .expect("mobile capability permissions must be an array");
-    for desktop_only in [
-        "updater:default",
-        "process:default",
-        "shell:default",
-        "shell:allow-open",
-        "fs:read-all",
-        "fs:write-all",
-        "fs:scope-home",
-        "core:window:default",
-    ] {
-        assert!(
-            !mobile_permissions
-                .iter()
-                .any(|entry| entry.as_str() == Some(desktop_only)),
-            "mobile capability must not include `{desktop_only}`"
-        );
-    }
+        .expect("capabilities must name their windows")
+        .iter()
+        .map(|entry| entry.as_str().expect("window labels are strings"))
+        .collect();
+    assert_eq!(labels, vec!["main", "detach-*"]);
 }
 
 #[test]
@@ -115,23 +94,36 @@ fn frontend_uses_zxyssh_favicon() {
 }
 
 #[test]
-fn tauri_bundle_declares_windows_icons() {
+fn tauri_bundle_packages_linux_and_ships_no_windows_assets() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let config_path = manifest_dir.join("tauri.conf.json");
     let config = read_json(&config_path);
 
+    let targets: Vec<&str> = config["bundle"]["targets"]
+        .as_array()
+        .expect("bundle.targets must be an array")
+        .iter()
+        .map(|entry| entry.as_str().expect("bundle.targets entries are strings"))
+        .collect();
+    assert_eq!(
+        targets,
+        vec!["deb", "appimage"],
+        "zxySSH ships Linux packages only"
+    );
+    assert!(
+        config["bundle"]["windows"].is_null(),
+        "Windows packaging must stay removed"
+    );
+
     let icon_entries = config["bundle"]["icon"]
         .as_array()
         .expect("bundle.icon must be an array");
+    assert!(icon_entries
+        .iter()
+        .any(|entry| entry.as_str() == Some("icons/icon.png")));
 
-    for icon_path in ["icons/icon.ico", "icons/icon.png"] {
-        assert!(
-            icon_entries
-                .iter()
-                .any(|entry| entry.as_str() == Some(icon_path)),
-            "bundle.icon must include `{icon_path}`"
-        );
-
+    for entry in icon_entries {
+        let icon_path = entry.as_str().expect("bundle.icon entries are strings");
         let icon_file = manifest_dir.join(icon_path);
         assert!(
             icon_file.exists(),

@@ -111,7 +111,9 @@ impl Crypto {
             .ok_or_else(|| anyhow!("Device crypto failed to initialize"))
     }
 
-    /// Shared loader for a prefix's device key pair.
+    /// Shared loader for a prefix's device key pair. Only the non-test build
+    /// reaches it, because `device()` substitutes a deterministic key in tests.
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn from_device_key_files(prefix: &str) -> Result<Self> {
         let app_dir = crate::platform::default_app_data_dir()?;
         Self::from_key_files_impl(&app_dir, prefix)

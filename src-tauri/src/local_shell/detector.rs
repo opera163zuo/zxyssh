@@ -36,15 +36,7 @@ pub enum ShellType {
 pub fn detect_available_shells() -> Vec<ShellInfo> {
     let mut shells = Vec::new();
 
-    #[cfg(target_os = "windows")]
-    {
-        shells.extend(detect_windows_shells());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        shells.extend(detect_unix_shells());
-    }
+    shells.extend(detect_unix_shells());
 
     // Mark the default shell
     if let Some(default_id) = get_default_shell_id() {
@@ -67,110 +59,6 @@ pub fn get_default_shell() -> Option<ShellInfo> {
     shells.into_iter().find(|s| s.is_default)
 }
 
-#[cfg(target_os = "windows")]
-fn detect_windows_shells() -> Vec<ShellInfo> {
-    let mut shells = Vec::new();
-
-    // PowerShell 7+ (pwsh)
-    if let Ok(path) = which::which("pwsh") {
-        shells.push(ShellInfo {
-            id: "pwsh".to_string(),
-            name: "PowerShell 7+".to_string(),
-            path: path.to_string_lossy().to_string(),
-            shell_type: ShellType::PowerShell,
-            is_default: false,
-        });
-    }
-
-    // Windows PowerShell (powershell.exe)
-    if let Ok(path) = which::which("powershell") {
-        shells.push(ShellInfo {
-            id: "powershell".to_string(),
-            name: "Windows PowerShell".to_string(),
-            path: path.to_string_lossy().to_string(),
-            shell_type: ShellType::PowerShell,
-            is_default: false,
-        });
-    }
-
-    // Command Prompt (cmd.exe)
-    if let Ok(path) = which::which("cmd") {
-        shells.push(ShellInfo {
-            id: "cmd".to_string(),
-            name: "Command Prompt".to_string(),
-            path: path.to_string_lossy().to_string(),
-            shell_type: ShellType::Cmd,
-            is_default: false,
-        });
-    }
-
-    // Git Bash - check common installation paths
-    let git_bash_paths = [
-        "C:\\Program Files\\Git\\bin\\bash.exe",
-        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
-    ];
-
-    for path_str in &git_bash_paths {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            shells.push(ShellInfo {
-                id: "git-bash".to_string(),
-                name: "Git Bash".to_string(),
-                path: path_str.to_string(),
-                shell_type: ShellType::Bash,
-                is_default: false,
-            });
-            break;
-        }
-    }
-
-    // WSL Bash (if WSL is installed)
-    if let Ok(path) = which::which("wsl") {
-        shells.push(ShellInfo {
-            id: "wsl".to_string(),
-            name: "WSL (Windows Subsystem for Linux)".to_string(),
-            path: path.to_string_lossy().to_string(),
-            shell_type: ShellType::Bash,
-            is_default: false,
-        });
-    }
-
-    // MSYS2 Bash
-    let msys2_paths = [
-        "C:\\msys64\\usr\\bin\\bash.exe",
-        "C:\\msys32\\usr\\bin\\bash.exe",
-    ];
-
-    for path_str in &msys2_paths {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            shells.push(ShellInfo {
-                id: "msys2-bash".to_string(),
-                name: "MSYS2 Bash".to_string(),
-                path: path_str.to_string(),
-                shell_type: ShellType::Bash,
-                is_default: false,
-            });
-            break;
-        }
-    }
-
-    // Cygwin Bash
-    let cygwin_path = PathBuf::from("C:\\cygwin64\\bin\\bash.exe");
-    if cygwin_path.exists() {
-        shells.push(ShellInfo {
-            id: "cygwin-bash".to_string(),
-            name: "Cygwin Bash".to_string(),
-            path: cygwin_path.to_string_lossy().to_string(),
-            shell_type: ShellType::Bash,
-            is_default: false,
-        });
-    }
-
-    shells
-}
-
-#[cfg(not(target_os = "windows"))]
 fn detect_unix_shells() -> Vec<ShellInfo> {
     let mut shells = Vec::new();
 
@@ -243,19 +131,6 @@ fn detect_unix_shells() -> Vec<ShellInfo> {
     shells
 }
 
-#[cfg(target_os = "windows")]
-fn get_default_shell_id() -> Option<String> {
-    // On Windows, prefer PowerShell 7+ if available, then Windows PowerShell
-    if which::which("pwsh").is_ok() {
-        Some("pwsh".to_string())
-    } else if which::which("powershell").is_ok() {
-        Some("powershell".to_string())
-    } else {
-        Some("cmd".to_string())
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
 fn get_default_shell_id() -> Option<String> {
     use std::env;
 

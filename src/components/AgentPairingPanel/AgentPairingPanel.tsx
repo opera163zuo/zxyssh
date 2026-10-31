@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { KeyRound, Link2, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX } from 'lucide-react';
+import { KeyRound, Link2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 
 import {
   useMcpPairingStore,
-  type PairingRequest,
   type PairedAgent,
 } from '../../stores/mcpPairingStore';
 
@@ -17,22 +16,17 @@ function remainingSeconds(expiresAt: number, now: number): number {
 export function AgentPairingPanel() {
   const { t } = useTranslation();
   const code = useMcpPairingStore((state) => state.code);
-  const requests = useMcpPairingStore((state) => state.requests);
   const agents = useMcpPairingStore((state) => state.agents);
-  const approvalRequired = useMcpPairingStore((state) => state.approvalRequired);
   const lanStatus = useMcpPairingStore((state) => state.lanStatus);
   const issuedToken = useMcpPairingStore((state) => state.issuedToken);
   const busy = useMcpPairingStore((state) => state.busy);
   const error = useMcpPairingStore((state) => state.error);
   const refresh = useMcpPairingStore((state) => state.refresh);
   const createCode = useMcpPairingStore((state) => state.createCode);
-  const approve = useMcpPairingStore((state) => state.approve);
-  const reject = useMcpPairingStore((state) => state.reject);
   const revoke = useMcpPairingStore((state) => state.revoke);
   const rename = useMcpPairingStore((state) => state.rename);
   const rotate = useMcpPairingStore((state) => state.rotate);
   const dismissIssuedToken = useMcpPairingStore((state) => state.dismissIssuedToken);
-  const setApprovalRequired = useMcpPairingStore((state) => state.setApprovalRequired);
 
   const [now, setNow] = useState(() => Date.now());
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
@@ -41,27 +35,21 @@ export function AgentPairingPanel() {
     void refresh();
   }, [refresh]);
 
-  // The queue is filled by another process, so it is re-read while the panel is
-  // open and a request or a code is still live.
+  // A code can be spent from another process, so the countdown is re-read live.
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    const waiting = requests.length > 0 || (code !== null && remainingSeconds(code.expiresAt, now) > 0);
-    if (!waiting) return;
+    if (code === null || remainingSeconds(code.expiresAt, now) <= 0) return;
     const timer = window.setInterval(() => {
       void refresh();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [requests.length, code, now, refresh]);
+  }, [code, now, refresh]);
 
   const codeRemaining = code ? remainingSeconds(code.expiresAt, now) : 0;
-  const awaiting = useMemo(
-    () => requests.filter((request) => request.status === 'awaiting_approval'),
-    [requests],
-  );
 
   return (
     <section className="border-y border-tokyo-bg-hl bg-tokyo-bg-dark/50">
@@ -103,29 +91,9 @@ export function AgentPairingPanel() {
             <span className="text-xs text-tokyo-comment">
               {t('settings.pairingAgentsCount', {
                 agents: lanStatus.activeAgents,
-                requests: lanStatus.pendingRequests,
               })}
             </span>
           )}
-        </dd>
-
-        <dt className="text-tokyo-comment">{t('settings.pairingApprovalMode')}</dt>
-        <dd className="text-tokyo-fg">
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={approvalRequired}
-              disabled={busy}
-              onChange={(event) => void setApprovalRequired(event.target.checked)}
-            />
-            <span>
-              <span className="text-sm">{t('settings.pairingApprovalRequire')}</span>
-              <span className="block text-xs text-tokyo-comment">
-                {t('settings.pairingApprovalHint')}
-              </span>
-            </span>
-          </label>
         </dd>
 
         <dt className="text-tokyo-comment">{t('settings.pairingCode')}</dt>
@@ -170,27 +138,6 @@ export function AgentPairingPanel() {
         </div>
       )}
 
-      <div className="border-b border-tokyo-bg-hl px-4 py-3">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-tokyo-comment">
-          {t('settings.pairingRequests')}
-        </h4>
-        {awaiting.length === 0 ? (
-          <p className="mt-2 text-xs text-tokyo-comment">{t('settings.pairingNoRequests')}</p>
-        ) : (
-          <ul className="mt-2 space-y-2">
-            {awaiting.map((request) => (
-              <RequestRow
-                key={request.id}
-                request={request}
-                busy={busy}
-                onApprove={() => void approve(request.id)}
-                onReject={() => void reject(request.id)}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-
       <div className="px-4 py-3">
         <h4 className="text-xs font-medium uppercase tracking-wide text-tokyo-comment">
           {t('settings.pairingAgents')}
@@ -222,42 +169,6 @@ export function AgentPairingPanel() {
   );
 }
 
-function RequestRow({
-  request,
-  busy,
-  onApprove,
-  onReject,
-}: {
-  request: PairingRequest;
-  busy: boolean;
-  onApprove: () => void;
-  onReject: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-3 rounded border border-tokyo-bg-hl bg-tokyo-bg px-3 py-2">
-      <div className="min-w-0">
-        <div className="truncate text-sm text-tokyo-fg">{request.agentName}</div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-tokyo-comment">
-          <span className="font-mono">{request.peer}</span>
-          <span>{t('settings.pairingRequestExpiresIn', {
-            seconds: Math.max(0, Math.ceil(request.expiresAt - Date.now() / 1000)),
-          })}</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button type="button" className="icon-button" disabled={busy} onClick={onApprove}>
-          <UserCheck className="h-4 w-4 text-tokyo-green" />
-          {t('settings.pairingApprove')}
-        </button>
-        <button type="button" className="icon-button" disabled={busy} onClick={onReject}>
-          <UserX className="h-4 w-4 text-tokyo-red" />
-          {t('settings.pairingReject')}
-        </button>
-      </div>
-    </li>
-  );
-}
 
 function AgentRow({
   agent,

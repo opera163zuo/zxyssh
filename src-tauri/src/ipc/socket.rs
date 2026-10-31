@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use log::info;
 use serde::{Deserialize, Serialize};
-#[cfg(not(windows))]
 use std::fs;
 use std::io;
 use std::io::{BufRead, BufReader, Write};
@@ -11,16 +10,7 @@ use std::time::UNIX_EPOCH;
 use tokio::io::AsyncReadExt;
 
 use interprocess::local_socket::traits::{ListenerExt, Stream as StreamTrait};
-#[cfg(not(windows))]
 use interprocess::local_socket::{GenericFilePath, ListenerOptions, ToFsName};
-#[cfg(windows)]
-use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName};
-#[cfg(windows)]
-use interprocess::os::windows::local_socket::ListenerOptionsExt as _;
-#[cfg(windows)]
-use interprocess::os::windows::security_descriptor::{
-    AsSecurityDescriptorMutExt as _, SecurityDescriptor,
-};
 
 use crate::commands::sftp::{SftpEntry, SftpFileContent};
 use crate::session::SessionManager;
@@ -117,12 +107,6 @@ pub enum IpcMessage {
     ListServers,
     /// List all active sessions
     ListSessions,
-    SessionService {
-        request: super::runtime_services::RuntimeRequest,
-    },
-    ServiceResult {
-        value: serde_json::Value,
-    },
     PluginList {
         installed_only: bool,
     },
@@ -348,16 +332,12 @@ pub enum IpcMessage {
     Ok,
 }
 
-#[cfg(not(windows))]
 use sha2::{Digest, Sha256};
 
-/// Socket name type alias for platform-specific implementation.
-#[cfg(windows)]
-type SocketName = interprocess::local_socket::Name<'static>;
-#[cfg(not(windows))]
+/// Socket name type alias for the filesystem-backed endpoint.
 type SocketName = interprocess::local_socket::Name<'static>;
 
-/// Per-user private directory holding the IPC socket on unix.
+/// Per-user private directory holding the IPC socket.
 ///
 /// A fixed location such as `/tmp/zxyssh.sock` lets any local user
 /// pre-create or squat the path and would expose the endpoint to every
@@ -365,7 +345,6 @@ type SocketName = interprocess::local_socket::Name<'static>;
 /// by the current user (mode 0700): `$XDG_RUNTIME_DIR/zxyssh-ipc` when the
 /// platform provides a runtime dir (Linux), otherwise
 /// `$TMPDIR/zxyssh-ipc-<uid-tag>` keyed by a hash of `$HOME`.
-#[cfg(not(windows))]
 fn ipc_socket_dir() -> Result<PathBuf> {
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         let runtime_dir = runtime_dir.trim();
@@ -381,7 +360,6 @@ fn ipc_socket_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-#[cfg(not(windows))]
 fn ensure_private_directory(path: &Path) -> Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     match fs::DirBuilder::new().mode(0o700).create(path) {
@@ -403,7 +381,6 @@ fn ensure_private_directory(path: &Path) -> Result<()> {
 /// account; hashing keeps the path short and avoids embedding user names.
 /// When `$HOME` is unset, callers share one 0700 directory (first creator
 /// wins), which is fine for the same-user daemon/CLI deployment model.
-#[cfg(not(windows))]
 fn ipc_user_tag() -> String {
     let identity = std::env::var("HOME").unwrap_or_default();
     let digest = Sha256::digest(identity.as_bytes());
@@ -415,7 +392,6 @@ fn ipc_user_tag() -> String {
 
 /// Restrict a file or directory to its owner (no-op on failure so endpoint
 /// setup never hard-fails on exotic filesystems).
-#[cfg(not(windows))]
 fn set_private_mode(path: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     if let Ok(metadata) = fs::metadata(path) {
@@ -426,12 +402,10 @@ fn set_private_mode(path: &Path, mode: u32) {
 }
 
 /// Full filesystem path of the unix IPC socket.
-#[cfg(not(windows))]
 fn socket_file_path() -> Result<PathBuf> {
     bounded_socket_path(ipc_socket_dir()?, &socket_name_base())
 }
 
-#[cfg(not(windows))]
 fn bounded_socket_path(mut directory: PathBuf, name: &str) -> Result<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
@@ -467,29 +441,14 @@ fn bounded_socket_path(mut directory: PathBuf, name: &str) -> Result<PathBuf> {
     Ok(directory.join(shortened))
 }
 
-/// Get the platform-specific socket name/path.
-///
-/// On Windows, we use named pipes in the namespaced format.
-/// On Unix, we use a Unix domain socket inside a per-user private directory.
+/// Get the socket name/path: a Unix domain socket inside a per-user private
+/// directory (`ZXYSSH_IPC_NAME` only names the file inside that dir).
 fn get_socket_name() -> Result<SocketName> {
-    #[cfg(windows)]
-    {
-        let socket_name = socket_name_base();
-        // On Windows, use namespaced name (named pipe)
-        socket_name
-            .to_ns_name::<GenericNamespaced>()
-            .context("Failed to create namespaced socket name")
-    }
-    #[cfg(not(windows))]
-    {
-        // On Unix, use a socket file in a per-user private directory
-        // (`ZXYSSH_IPC_NAME` still only names the file inside that dir).
-        socket_file_path()?
-            .to_string_lossy()
-            .to_string()
-            .to_fs_name::<GenericFilePath>()
-            .context("Failed to create filesystem socket name")
-    }
+    socket_file_path()?
+        .to_string_lossy()
+        .to_string()
+        .to_fs_name::<GenericFilePath>()
+        .context("Failed to create filesystem socket name")
 }
 
 fn socket_name_base() -> String {
@@ -501,35 +460,11 @@ fn socket_name_base() -> String {
 }
 
 fn socket_name_display() -> String {
-    #[cfg(windows)]
-    {
-        format!("\\\\.\\pipe\\{}", socket_name_base())
-    }
-    #[cfg(not(windows))]
-    {
-        socket_file_path()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| format!("<unavailable>/{}", socket_name_base()))
-    }
+    socket_file_path()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| format!("<unavailable>/{}", socket_name_base()))
 }
 
-#[cfg(windows)]
-fn is_recoverable_listener_error(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::BrokenPipe
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::WouldBlock
-    ) || matches!(err.raw_os_error(), Some(109 | 232 | 233 | 234))
-}
-
-#[cfg(not(windows))]
-fn is_recoverable_listener_error(_err: &io::Error) -> bool {
-    false
-}
-
-#[cfg(not(windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StaleSocketCleanup {
     Removed,
@@ -537,12 +472,10 @@ enum StaleSocketCleanup {
     NotRemoved,
 }
 
-#[cfg(not(windows))]
 fn is_stale_socket_bind_error(bind_kind: io::ErrorKind, endpoint_exists: bool) -> bool {
     endpoint_exists && matches!(bind_kind, io::ErrorKind::AddrInUse)
 }
 
-#[cfg(not(windows))]
 fn cleanup_stale_socket_file(
     bind_kind: io::ErrorKind,
     endpoint_display: &str,
@@ -605,25 +538,7 @@ fn cleanup_stale_socket_file(
 }
 
 fn listener_options(socket_name: SocketName) -> Result<ListenerOptions<'static>> {
-    #[cfg(windows)]
-    {
-        let mut security_descriptor =
-            SecurityDescriptor::new().context("Failed to create IPC security descriptor")?;
-        unsafe {
-            security_descriptor
-                .borrow_mut()
-                .set_dacl(std::ptr::null_mut(), false)
-                .context("Failed to configure IPC security descriptor")?;
-        }
-
-        Ok(ListenerOptions::new()
-            .name(socket_name)
-            .security_descriptor(security_descriptor))
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(ListenerOptions::new().name(socket_name))
-    }
+    Ok(ListenerOptions::new().name(socket_name))
 }
 
 /// Copy of an IPC message that is safe to include in debug logs: the secret
@@ -778,63 +693,48 @@ impl IpcServer {
         let listener = match options.create_sync() {
             Ok(l) => l,
             Err(e) => {
-                #[cfg(not(windows))]
-                {
-                    let endpoint_display = Self::socket_name_display();
-                    match cleanup_stale_socket_file(
-                        e.kind(),
-                        &endpoint_display,
-                        Path::new(&endpoint_display).exists(),
-                    ) {
-                        StaleSocketCleanup::Removed => {
-                            let socket_name =
-                                get_socket_name().map_err(IpcServerRunError::ListenerSetup)?;
-                            let options = listener_options(socket_name)
-                                .map_err(IpcServerRunError::ListenerSetup)?;
-                            match options.create_sync() {
-                                Ok(listener) => listener,
-                                Err(retry_err) => {
-                                    log::error!(
-                                        "[IPC] Listener creation failed on {} after stale socket cleanup: {:?}",
-                                        Self::socket_name_display(),
-                                        retry_err
-                                    );
-                                    return Err(IpcServerRunError::ListenerBind(retry_err));
-                                }
+                let endpoint_display = Self::socket_name_display();
+                match cleanup_stale_socket_file(
+                    e.kind(),
+                    &endpoint_display,
+                    Path::new(&endpoint_display).exists(),
+                ) {
+                    StaleSocketCleanup::Removed => {
+                        let socket_name =
+                            get_socket_name().map_err(IpcServerRunError::ListenerSetup)?;
+                        let options = listener_options(socket_name)
+                            .map_err(IpcServerRunError::ListenerSetup)?;
+                        match options.create_sync() {
+                            Ok(listener) => listener,
+                            Err(retry_err) => {
+                                log::error!(
+                                    "[IPC] Listener creation failed on {} after stale socket cleanup: {:?}",
+                                    Self::socket_name_display(),
+                                    retry_err
+                                );
+                                return Err(IpcServerRunError::ListenerBind(retry_err));
                             }
                         }
-                        StaleSocketCleanup::BecameReachable => {
-                            return Err(IpcServerRunError::ListenerBind(e));
-                        }
-                        StaleSocketCleanup::NotRemoved => {
-                            log::error!(
-                                "[IPC] Listener creation failed on {}: {:?}",
-                                Self::socket_name_display(),
-                                e
-                            );
-                            return Err(IpcServerRunError::ListenerBind(e));
-                        }
                     }
-                }
-                #[cfg(windows)]
-                {
-                    log::error!(
-                        "[IPC] Listener creation failed on {}: {:?}",
-                        Self::socket_name_display(),
-                        e
-                    );
-                    return Err(IpcServerRunError::ListenerBind(e));
+                    StaleSocketCleanup::BecameReachable => {
+                        return Err(IpcServerRunError::ListenerBind(e));
+                    }
+                    StaleSocketCleanup::NotRemoved => {
+                        log::error!(
+                            "[IPC] Listener creation failed on {}: {:?}",
+                            Self::socket_name_display(),
+                            e
+                        );
+                        return Err(IpcServerRunError::ListenerBind(e));
+                    }
                 }
             }
         };
 
-        #[cfg(not(windows))]
-        {
-            // Restrict the socket file to its owner so other local accounts
-            // cannot connect to (or tamper with) the IPC endpoint.
-            if let Ok(path) = socket_file_path() {
-                set_private_mode(&path, 0o600);
-            }
+        // Restrict the socket file to its owner so other local accounts
+        // cannot connect to (or tamper with) the IPC endpoint.
+        if let Ok(path) = socket_file_path() {
+            set_private_mode(&path, 0o600);
         }
 
         log::info!("[IPC] Server listening on {}", Self::socket_name_display());
@@ -856,15 +756,6 @@ impl IpcServer {
                     });
                 }
                 Err(e) => {
-                    if is_recoverable_listener_error(&e) {
-                        log::warn!(
-                            "[IPC] Recoverable accept error on {}: {}",
-                            Self::socket_name_display(),
-                            e
-                        );
-                        continue;
-                    }
-
                     log::error!(
                         "[IPC] Accept error on {}: {}",
                         Self::socket_name_display(),
@@ -1241,12 +1132,6 @@ impl IpcServer {
             other => other,
         };
         match message {
-            IpcMessage::SessionService { request } => {
-                match rt.block_on(super::runtime_services::dispatch(&session_manager, request)) {
-                    Ok(value) => IpcMessage::ServiceResult { value },
-                    Err(message) => IpcMessage::Error { message },
-                }
-            }
             IpcMessage::PluginList { installed_only } => {
                 match crate::plugins::agent::list(&database, installed_only) {
                     Ok(data) => IpcMessage::PluginData {
@@ -2212,104 +2097,63 @@ impl IpcClient {
         match Stream::connect(socket_name) {
             Ok(_) => Ok(IpcEndpointStatus::Reachable),
             Err(connect_err) => {
-                #[cfg(windows)]
-                {
-                    let bind_check = get_socket_name()
-                        .context("Failed to create namespaced socket name for probe")?;
-                    match ListenerOptions::new().name(bind_check).create_sync() {
-                        Ok(listener) => {
-                            drop(listener);
-                            Ok(IpcEndpointStatus::NotRunning)
+                let endpoint_display = socket_name_display();
+                let endpoint_exists = Path::new(&endpoint_display).exists();
+
+                let mut bind_outcome = match get_socket_name()
+                    .context("Failed to create filesystem socket name for probe")
+                    .and_then(|bind_check| {
+                        ListenerOptions::new()
+                            .name(bind_check)
+                            .create_sync()
+                            .map(|listener| {
+                                drop(listener);
+                                let _ = fs::remove_file(&endpoint_display);
+                            })
+                            .map_err(anyhow::Error::from)
+                    }) {
+                    Ok(()) => Ok(()),
+                    Err(bind_err) => Err(bind_err
+                        .downcast_ref::<io::Error>()
+                        .map(|err| err.kind())
+                        .unwrap_or(io::ErrorKind::Other)),
+                };
+
+                if let Err(bind_kind) = bind_outcome {
+                    match cleanup_stale_socket_file(bind_kind, &endpoint_display, endpoint_exists) {
+                        StaleSocketCleanup::Removed => {
+                            bind_outcome = Ok(());
                         }
-                        Err(bind_err)
-                            if matches!(
-                                bind_err.kind(),
-                                io::ErrorKind::PermissionDenied | io::ErrorKind::AddrInUse
-                            ) =>
-                        {
-                            log::warn!(
-                                "[IPC] Endpoint probe connect failed with {:?}, bind check failed with {:?} on {}",
-                                connect_err.kind(),
-                                bind_err.kind(),
-                                socket_name_display()
-                            );
-                            Ok(IpcEndpointStatus::Occupied)
+                        StaleSocketCleanup::BecameReachable => {
+                            return Ok(IpcEndpointStatus::Reachable);
                         }
-                        Err(bind_err) => {
-                            log::debug!(
-                                "[IPC] Endpoint probe connect failed with {:?}, bind check failed with {:?} on {}",
-                                connect_err.kind(),
-                                bind_err.kind(),
-                                socket_name_display()
-                            );
-                            Ok(IpcEndpointStatus::NotRunning)
-                        }
+                        StaleSocketCleanup::NotRemoved => {}
                     }
                 }
-                #[cfg(not(windows))]
-                {
-                    let endpoint_display = socket_name_display();
-                    let endpoint_exists = Path::new(&endpoint_display).exists();
 
-                    let mut bind_outcome = match get_socket_name()
-                        .context("Failed to create filesystem socket name for probe")
-                        .and_then(|bind_check| {
-                            ListenerOptions::new()
-                                .name(bind_check)
-                                .create_sync()
-                                .map(|listener| {
-                                    drop(listener);
-                                    let _ = fs::remove_file(&endpoint_display);
-                                })
-                                .map_err(anyhow::Error::from)
-                        }) {
-                        Ok(()) => Ok(()),
-                        Err(bind_err) => Err(bind_err
-                            .downcast_ref::<io::Error>()
-                            .map(|err| err.kind())
-                            .unwrap_or(io::ErrorKind::Other)),
-                    };
+                let status = Self::classify_non_windows_probe(
+                    connect_err.kind(),
+                    bind_outcome,
+                    endpoint_exists,
+                );
 
-                    if let Err(bind_kind) = bind_outcome {
-                        match cleanup_stale_socket_file(
-                            bind_kind,
-                            &endpoint_display,
-                            endpoint_exists,
-                        ) {
-                            StaleSocketCleanup::Removed => {
-                                bind_outcome = Ok(());
-                            }
-                            StaleSocketCleanup::BecameReachable => {
-                                return Ok(IpcEndpointStatus::Reachable);
-                            }
-                            StaleSocketCleanup::NotRemoved => {}
-                        }
-                    }
-
-                    let status = Self::classify_non_windows_probe(
+                if status == IpcEndpointStatus::Occupied {
+                    log::warn!(
+                        "[IPC] Endpoint probe connect failed with {:?}, endpoint_exists={}, classified as occupied on {}",
                         connect_err.kind(),
-                        bind_outcome,
                         endpoint_exists,
+                        endpoint_display
                     );
-
-                    if status == IpcEndpointStatus::Occupied {
-                        log::warn!(
-                            "[IPC] Endpoint probe connect failed with {:?}, endpoint_exists={}, classified as occupied on {}",
-                            connect_err.kind(),
-                            endpoint_exists,
-                            endpoint_display
-                        );
-                    } else {
-                        log::debug!(
-                            "[IPC] Endpoint probe connect failed with {:?}, endpoint_exists={}, classified as not running on {}",
-                            connect_err.kind(),
-                            endpoint_exists,
-                            endpoint_display
-                        );
-                    }
-
-                    Ok(status)
+                } else {
+                    log::debug!(
+                        "[IPC] Endpoint probe connect failed with {:?}, endpoint_exists={}, classified as not running on {}",
+                        connect_err.kind(),
+                        endpoint_exists,
+                        endpoint_display
+                    );
                 }
+
+                Ok(status)
             }
         }
     }
@@ -2317,9 +2161,6 @@ impl IpcClient {
         match Self::probe_endpoint() {
             Ok(status) => status,
             Err(err) => {
-                #[cfg(windows)]
-                let platform_branch = "windows-namespaced";
-                #[cfg(not(windows))]
                 let platform_branch = "non-windows-filesystem";
 
                 let mut root_source: &(dyn std::error::Error + 'static) = err.as_ref();
@@ -2413,7 +2254,6 @@ impl IpcClient {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
     #[test]
     fn socket_names_are_bounded_stable_and_confined() {
         use std::os::unix::ffi::OsStrExt;
@@ -2624,29 +2464,20 @@ mod tests {
             display.contains("zxyssh"),
             "Socket name should contain zxyssh"
         );
-        #[cfg(windows)]
         assert!(
-            display.contains("pipe"),
-            "Windows socket should be a named pipe"
+            display.contains("zxyssh-ipc"),
+            "Unix socket should live in a per-user zxyssh-ipc directory: {}",
+            display
         );
-        #[cfg(not(windows))]
-        {
-            assert!(
-                display.contains("zxyssh-ipc"),
-                "Unix socket should live in a per-user zxyssh-ipc directory: {}",
-                display
-            );
-            assert!(
-                display.ends_with(DEFAULT_SOCKET_NAME),
-                "Unix socket display should end with the socket file name: {}",
-                display
-            );
-            // The old fixed `/tmp/zxyssh.sock` path must not be used.
-            assert_ne!(display, format!("/tmp/{}", DEFAULT_SOCKET_NAME));
-        }
+        assert!(
+            display.ends_with(DEFAULT_SOCKET_NAME),
+            "Unix socket display should end with the socket file name: {}",
+            display
+        );
+        // The old fixed `/tmp/zxyssh.sock` path must not be used.
+        assert_ne!(display, format!("/tmp/{}", DEFAULT_SOCKET_NAME));
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn test_ipc_socket_dir_is_private() {
         let dir = ipc_socket_dir().expect("IPC socket directory should be creatable");
@@ -2849,7 +2680,6 @@ mod tests {
         assert_eq!(status, IpcEndpointStatus::Occupied);
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn test_non_windows_stale_socket_cleanup_is_limited_to_addr_in_use_files() {
         assert!(is_stale_socket_bind_error(io::ErrorKind::AddrInUse, true));
@@ -2858,19 +2688,5 @@ mod tests {
             true
         ));
         assert!(!is_stale_socket_bind_error(io::ErrorKind::AddrInUse, false));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_windows_listener_error_232_is_recoverable() {
-        let err = io::Error::from_raw_os_error(232);
-        assert!(is_recoverable_listener_error(&err));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_windows_permission_denied_listener_error_is_not_recoverable() {
-        let err = io::Error::from_raw_os_error(5);
-        assert!(!is_recoverable_listener_error(&err));
     }
 }

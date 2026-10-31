@@ -51,7 +51,6 @@ impl Drop for ShellReader {
 #[derive(Clone)]
 pub struct SshClient {
     shell_reader: Arc<ShellReader>,
-    remote_forwards: crate::tunnel::remote_forward::RemoteForwardRegistry,
     session: Arc<Mutex<Option<client::Handle<ClientHandler>>>>,
     channel: Arc<Mutex<Option<ChannelWriteHalf<client::Msg>>>>,
     output_tx: mpsc::Sender<Vec<u8>>,
@@ -69,7 +68,6 @@ pub struct SshClient {
 }
 
 pub struct ClientHandler {
-    remote_forwards: crate::tunnel::remote_forward::RemoteForwardRegistry,
     /// Storage for the captured server key
     server_key: Arc<Mutex<Option<ServerKeyInfo>>>,
     /// Host-key verification policy; when absent the handshake fails closed.
@@ -93,7 +91,7 @@ impl client::Handler for ClientHandler {
 
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
-        channel: Channel<client::Msg>,
+        _channel: Channel<client::Msg>,
         connected_address: &str,
         connected_port: u32,
         _originator_address: &str,
@@ -101,19 +99,16 @@ impl client::Handler for ClientHandler {
         reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let sender = self.remote_forwards.lock().ok().and_then(|routes| {
-            routes
-                .get(&(connected_address.to_string(), connected_port))
-                .cloned()
-        });
-        if let Some(permit) = sender.and_then(|sender| sender.try_reserve_owned().ok()) {
-            reply.accept().await;
-            permit.send(channel);
-        } else {
-            reply
-                .reject(ChannelOpenFailure::AdministrativelyProhibited)
-                .await;
-        }
+        // zxySSH never asks the server to forward a port, so no incoming
+        // forwarded-tcpip channel can be one we requested. Fail closed rather
+        // than letting a server push connections at this client.
+        warn!(
+            "[SSH] Rejecting server-initiated forwarded channel to {}:{}",
+            connected_address, connected_port
+        );
+        reply
+            .reject(ChannelOpenFailure::AdministrativelyProhibited)
+            .await;
         Ok(())
     }
 
@@ -211,7 +206,6 @@ impl SshClient {
     pub fn new(output_tx: mpsc::Sender<Vec<u8>>) -> Self {
         Self {
             shell_reader: Arc::new(ShellReader::default()),
-            remote_forwards: Default::default(),
             session: Arc::new(Mutex::new(None)),
             channel: Arc::new(Mutex::new(None)),
             output_tx,
@@ -220,12 +214,6 @@ impl SshClient {
             host_key_check: None,
             host_key_rejection: Arc::new(StdMutex::new(None)),
         }
-    }
-
-    pub(crate) fn remote_forward_registry(
-        &self,
-    ) -> crate::tunnel::remote_forward::RemoteForwardRegistry {
-        self.remote_forwards.clone()
     }
 
     /// Attach the host-key verification policy (which store to consult and
@@ -287,7 +275,6 @@ impl SshClient {
         debug!("[SSH] Config: inactivity_timeout=60s, keepalive_interval=10s, keepalive_max=5");
 
         let handler = ClientHandler {
-            remote_forwards: self.remote_forwards.clone(),
             server_key: self.server_key.clone(),
             host_key_check: self.host_key_check.clone(),
             host_key_rejection: self.host_key_rejection.clone(),

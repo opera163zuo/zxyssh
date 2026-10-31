@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import type { MobileWorkspaceMenuItem } from '../MobileWorkspaceActions/MobileWorkspaceActions';
 
-export type WorkspaceMenuItem = MobileWorkspaceMenuItem;
+export interface WorkspaceMenuItem {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  pressed?: boolean;
+  onSelect: () => void;
+}
 
 interface WorkspaceToolbarProps {
   /** Accessible label / tooltip for the overflow trigger button. */
@@ -14,12 +20,10 @@ interface WorkspaceToolbarProps {
 }
 
 /**
- * Desktop overflow menu for low-frequency workspace actions. Mirrors the
- * dropdown pattern from MobileWorkspaceActions (pointerdown-outside close,
- * Escape close, focus restored to the trigger) but uses desktop-sized
- * icon-button styling and a denser menu. High-frequency actions (Quick Cmd,
- * SFTP, split panes) stay as direct buttons in the parent toolbar; everything
- * else lives here.
+ * Desktop overflow menu for low-frequency workspace actions (pointerdown-outside
+ * close, Escape close, focus restored to the trigger). High-frequency actions
+ * (Quick Cmd, SFTP, split panes) stay as direct buttons in the parent toolbar;
+ * everything else lives here.
  */
 export function WorkspaceToolbar({ label, items, anyPressed = false }: WorkspaceToolbarProps) {
   const [open, setOpen] = useState(false);

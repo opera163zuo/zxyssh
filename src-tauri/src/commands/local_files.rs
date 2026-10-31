@@ -96,21 +96,14 @@ pub fn take_pending_open_files(
 
 #[tauri::command]
 pub async fn pick_local_files() -> Result<Vec<String>, String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        Err("Desktop file selection is unavailable on mobile".into())
-    }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        Ok(rfd::AsyncFileDialog::new()
-            .set_title("Open documents or images in zxySSH")
-            .pick_files()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|file| file.path().to_string_lossy().into_owned())
-            .collect())
-    }
+    Ok(rfd::AsyncFileDialog::new()
+        .set_title("Open documents or images in zxySSH")
+        .pick_files()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|file| file.path().to_string_lossy().into_owned())
+        .collect())
 }
 
 #[tauri::command]
@@ -242,34 +235,26 @@ pub async fn export_theme_css(css: String) -> Result<Option<String>, String> {
     if css.len() > 2 * 1024 * 1024 {
         return Err("CSS export exceeds 2 MiB".into());
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        Err("Desktop CSS export is unavailable on mobile".into())
-    }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let file = rfd::AsyncFileDialog::new()
-            .set_title("Export zxySSH CSS theme")
-            .set_file_name("zxyssh-theme.css")
-            .add_filter("CSS theme", &["css"])
-            .save_file()
-            .await;
-        let Some(file) = file else {
-            return Ok(None);
-        };
-        let path = file.path().to_path_buf();
-        tauri::async_runtime::spawn_blocking(move || {
-            fs::write(&path, css).map_err(|e| e.to_string())?;
-            Ok(Some(path.to_string_lossy().into_owned()))
-        })
-        .await
-        .map_err(|e| e.to_string())?
-    }
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Export zxySSH CSS theme")
+        .set_file_name("zxyssh-theme.css")
+        .add_filter("CSS theme", &["css"])
+        .save_file()
+        .await;
+    let Some(file) = file else {
+        return Ok(None);
+    };
+    let path = file.path().to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::write(&path, css).map_err(|e| e.to_string())?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn install_workspace_menu(app: &tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItemBuilder, Submenu};
+    use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
     let open = MenuItemBuilder::with_id("zxyssh-open-files", "Open Files… / 打开文件")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
@@ -279,9 +264,26 @@ pub fn install_workspace_menu(app: &tauri::App) -> tauri::Result<()> {
     )
     .accelerator("CmdOrCtrl+Shift+F12")
     .build(app)?;
+    // Built from scratch rather than Menu::default(): the default menu also adds
+    // a Window submenu (minimize/maximize/close, which muda leaves unrendered on
+    // Linux and which duplicate the title-bar buttons) and a Help/About dialog
+    // that duplicates Settings -> About.
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
     let submenu = Submenu::with_items(app, "Workspace", true, &[&open, &recover])?;
-    let menu = Menu::default(app.handle())?;
-    menu.append(&submenu)?;
+    let menu = Menu::with_items(app, &[&edit, &submenu])?;
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| match event.id().as_ref() {
         "zxyssh-open-files" => {
