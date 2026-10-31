@@ -136,7 +136,6 @@ mockIPC(async (cmd, payload) => {
     case 'plugin:window|get_all_windows': return ['main'];
     case 'plugin:window|available_monitors': return [{ name: 'Demo display', position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1, workArea: { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } } }];
     case 'plugin:window|set_position': case 'plugin:window|set_size': return null;
-    case 'cloud_sync_status': return { unlocked: false, syncing: false, provider: null, endpoint: null, vaultId: null, pendingChanges: 0, conflicts: 0, lastSuccessAt: null, lastError: null };
     case 'agent_activity_list': return activity.filter(item => (!args.after || item.sequence > args.after) && (!args.before || item.sequence < args.before));
     case 'get_agent_guard_status': return { autoApproveUntil: null, pending: [] };
     case 'resolve_agent_approval': await emit('agent-approval-resolved', { id: request.id }); return null;

@@ -62,8 +62,7 @@ documented:
 - **Dead capability flags.** `backgroundTunnels` and `cliIpc` were reported by
   the backend and read by nobody but the tests that asserted they existed.
 
-The frontend tunnel store and its types went with them, and `Recording` moved
-to `src/types/recording.ts`.
+The frontend tunnel store and its types went with them.
 
 ### Four surfaces we no longer ship
 
@@ -87,12 +86,32 @@ Deleting the recording commands also removed the last producer of the
 `SessionService` IPC request, so that variant and its dispatcher are gone too:
 the service socket now carries session I/O only.
 
-**Not yet removed:** the sync engine (`src-tauri/src/storage/sync.rs`, ~4.3k
-lines including 33 storage tests) and the outbox writes it still performs on
-every server and group save. Nothing consumes that outbox now. It is dead, but
-removing it means re-pointing the storage test suite that currently uses it to
-verify rename conflicts and cascade behaviour, so it stays until that is done on
-purpose.
+The sync engine went with it. `src-tauri/src/storage/sync.rs` (~4.3k lines) and
+`sync_crypto.rs` (~390) are deleted, which removes the outbox, the revision and
+tombstone bookkeeping, the conflict convergence rules, the vault cursors and the
+batch envelope format. Every server, group, snippet and plugin save had been
+writing a JSON change into `sync_outbox` that nothing had read since the Cloud
+Sync UI was removed; those sixteen writes are gone, and `server_delete` /
+`group_delete` now run their own detach updates — clearing `group_id`,
+`parent_id` and `jump_host_id`, columns that carry no foreign key — instead of
+calling into the sync module to do it. `Database::cloud_sync()` no longer exists,
+so the four tables (`sync_metadata`, `sync_entity_state`, `sync_outbox`,
+`sync_vault_state`) are no longer created at all.
+
+Nothing about the on-disk data of an existing installation breaks: SQLite does
+not drop the old tables, and leaving them is harmless because no code reads them.
+The `recordings.sync_status` column stays in the schema for the same reason, but
+the `Recording` model no longer carries a field for it, and its three readers no
+longer select it — which also means a database written before that column
+existed can be listed again.
+
+Renaming an Agent-facing surface is not the same as testing it, so the storage
+invariants that the sync suite was carrying by accident now have their own file:
+`src-tauri/tests/database_domain_test.rs` runs against the real `init_schema()`
+and asserts that a deleted server cascades its declared foreign keys, keeps
+recording rows, detaches its dependents' `jump_host_id`, and that a deleted group
+detaches both child groups and member sites. The other 30 tests in `sync.rs`
+tested the outbox and died with it.
 
 ### Windows stopped being a target we pretend to support
 

@@ -1,6 +1,10 @@
 # Cloud Sync and Mobile Support
 
-Status: encrypted manual sync and mobile runtime foundation implemented
+Status: superseded — implemented, then removed. Mobile runtime and session
+recording were dropped in the 2.2 Linux-only remediation, and the encrypted
+manual sync plane with its outbox and vault engine (`storage/sync.rs`) was
+deleted with it. The desktop is the single source of site configuration; this
+document stays as the design record for what was built.
 
 ## Outcomes
 
