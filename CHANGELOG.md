@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Pairing follows the listener address
+
+`zxyssh mcp pair` no longer assumes its service is on loopback. When the
+operator omits `--endpoint`, it uses the live listener address already
+published in zxySSH's local service status file; an explicit
+`--endpoint` still takes precedence, and loopback remains the fallback when no
+service has published a live status. This lets a local Agent pair with a
+listener bound to a specific LAN interface without copying its IP by hand.
+
 ### The pairing panel says what it means now
 
 The countdown and the Agent count rendered as `%{seconds}` and `%{agents}`: those
