@@ -30,6 +30,7 @@ beforeEach(() => {
     agents: [],
     lanStatus: null,
     issuedToken: null,
+    pairedJustNow: null,
     busy: false,
     error: null,
   });
@@ -88,4 +89,37 @@ it('re-reads the registry after a revocation and passes the id through', async (
     'mcp_agents_list',
     'mcp_lan_status',
   ]);
+});
+
+it('leaves a code alone while the registry still has it armed', async () => {
+  useMcpPairingStore.setState({ code: { code: '123456', expiresAt: 99 } });
+  safeInvoke.mockImplementationOnce((command) => {
+    expect(command).toBe('mcp_pair_code_pending');
+    return ok(true);
+  });
+
+  await useMcpPairingStore.getState().checkCode();
+  expect(useMcpPairingStore.getState().code?.code).toBe('123456');
+  expect(safeInvoke).toHaveBeenCalledTimes(1);
+});
+
+it('drops a spent code and names the Agent that just paired', async () => {
+  useMcpPairingStore.setState({
+    code: { code: '123456', expiresAt: 99 },
+    agents: [{ id: 'a1', name: 'hermes-office', revoked: false }],
+  });
+  safeInvoke
+    .mockImplementationOnce(() => ok(false))
+    .mockImplementationOnce(() =>
+      ok([
+        { id: 'a1', name: 'hermes-office', revoked: false },
+        { id: 'b2', name: 'opencode-lan', revoked: false },
+      ]),
+    )
+    .mockImplementationOnce(() => ok(listener));
+
+  await useMcpPairingStore.getState().checkCode();
+  const state = useMcpPairingStore.getState();
+  expect(state.code).toBeNull();
+  expect(state.pairedJustNow).toBe('opencode-lan');
 });

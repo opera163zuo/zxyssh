@@ -5,22 +5,6 @@ import { invokeOrThrow } from '../lib/tauri';
 // Types
 // ============================================================================
 
-/**
- * Represents an AI coding tool that can be configured with zxySSH MCP.
- */
-export interface AiTool {
-  /** Unique identifier for the tool (e.g., "claude-code", "cursor") */
-  id: string;
-  /** Human-readable name of the tool */
-  name: string;
-  /** Path to the tool's MCP configuration file */
-  configPath: string;
-  /** Whether the AI tool is installed on the system */
-  installed: boolean;
-  /** Whether zxySSH is configured in the tool */
-  zxysshInstalled: boolean;
-}
-
 /** Status of the Agent Gateway hosted by the zxySSH GUI. */
 export interface AgentGatewayStatus {
   running: boolean;
@@ -146,9 +130,6 @@ export const defaultUploadIgnoreConfig: UploadIgnoreConfig = {
  * Settings store state and actions.
  */
 interface SettingsStore {
-  // AI Tools state
-  /** List of detected AI tools */
-  aiTools: AiTool[];
   /** Built-in Agent Gateway status */
   gatewayStatus: AgentGatewayStatus | null;
   /** Current application version from the backend package metadata */
@@ -165,24 +146,15 @@ interface SettingsStore {
   // Loading/Error state
   /** Loading state for async operations */
   loading: boolean;
-  /** ID of the tool currently being installed/uninstalled (null if none) */
-  loadingToolId: string | null;
   /** Error message if any operation fails */
   error: string | null;
   /** Whether settings have been loaded from storage */
   initialized: boolean;
 
-  // AI Tools actions
-  /** Fetch all AI tools and their installation status */
-  fetchAiTools: () => Promise<void>;
   /** Fetch built-in Agent Gateway status */
   fetchGatewayStatus: () => Promise<void>;
   /** Fetch current app version */
   fetchAppVersion: () => Promise<void>;
-  /** Install zxySSH to a specific AI tool */
-  installTo: (toolId: string) => Promise<void>;
-  /** Uninstall zxySSH from a specific AI tool */
-  uninstallFrom: (toolId: string) => Promise<void>;
 
   // Settings actions
   /** Initialize settings from persistent storage */
@@ -335,33 +307,14 @@ async function saveUploadIgnoreConfig(config: UploadIgnoreConfig): Promise<Uploa
  */
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   // Initial state
-  aiTools: [],
   gatewayStatus: null,
   appVersion: null,
   appVersionLoaded: false,
   settings: { ...defaultSettings },
   uploadIgnoreConfig: { ...defaultUploadIgnoreConfig },
   loading: false,
-  loadingToolId: null,
   error: null,
   initialized: false,
-
-  // -------------------------------------------------------------------------
-  // AI Tools Actions
-  // -------------------------------------------------------------------------
-
-  fetchAiTools: async () => {
-    set({ loading: true, error: null });
-    try {
-      const tools = await invokeOrThrow<AiTool[]>('detect_ai_tools');
-      set({ aiTools: tools, loading: false });
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : String(error),
-        loading: false,
-      });
-    }
-  },
 
   fetchGatewayStatus: async () => {
     try {
@@ -381,38 +334,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     } catch (error) {
       console.warn('Failed to fetch app version:', error);
       set({ appVersion: null, appVersionLoaded: true });
-    }
-  },
-
-  installTo: async (toolId: string) => {
-    set({ loading: true, loadingToolId: toolId, error: null });
-    try {
-      await invokeOrThrow('install_to_tool', { toolId });
-      // Refresh the tools list after installation
-      await get().fetchAiTools();
-      set({ loadingToolId: null });
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : String(error),
-        loading: false,
-        loadingToolId: null,
-      });
-    }
-  },
-
-  uninstallFrom: async (toolId: string) => {
-    set({ loading: true, loadingToolId: toolId, error: null });
-    try {
-      await invokeOrThrow('uninstall_from_tool', { toolId });
-      // Refresh the tools list after uninstallation
-      await get().fetchAiTools();
-      set({ loadingToolId: null });
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : String(error),
-        loading: false,
-        loadingToolId: null,
-      });
     }
   },
 

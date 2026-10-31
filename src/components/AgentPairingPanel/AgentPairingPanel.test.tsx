@@ -13,6 +13,7 @@ const defaults = {
   agents: [] as { id: string; name: string; revoked: boolean }[],
   lanStatus: null,
   issuedToken: null,
+  pairedJustNow: null,
   busy: false,
   error: null,
 };
@@ -22,6 +23,7 @@ beforeEach(() => {
     ...defaults,
     refresh: vi.fn(async () => {}),
     createCode: vi.fn(async () => {}),
+    checkCode: vi.fn(async () => {}),
     revoke: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     rotate: vi.fn(async () => {}),
@@ -47,6 +49,21 @@ it('creates a pairing code and then shows it with its countdown', async () => {
   render(<AgentPairingPanel />);
   expect(screen.getByText('481516')).toBeInTheDocument();
   expect(screen.queryByText('settings.pairingCodeCreate')).not.toBeInTheDocument();
+});
+
+it('rerolls a live code on click and announces an Agent that just paired', () => {
+  useMcpPairingStore.setState({
+    ...defaults,
+    code: { code: '481516', expiresAt: Math.floor(Date.now() / 1000) + 120 },
+  });
+  render(<AgentPairingPanel />);
+  fireEvent.click(screen.getByText('481516'));
+  expect(useMcpPairingStore.getState().createCode).toHaveBeenCalledOnce();
+
+  cleanup();
+  useMcpPairingStore.setState({ ...defaults, pairedJustNow: 'opencode-lan' });
+  render(<AgentPairingPanel />);
+  expect(screen.getByText('settings.pairingJustPaired')).toBeInTheDocument();
 });
 
 it('lets the operator rename, rotate and revoke a live Agent but not a revoked one', () => {

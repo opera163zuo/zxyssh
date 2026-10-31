@@ -7,7 +7,7 @@ import {
   type PairedAgent,
 } from '../../stores/mcpPairingStore';
 
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 2_000;
 
 function remainingSeconds(expiresAt: number, now: number): number {
   return Math.max(0, Math.ceil(expiresAt - now / 1000));
@@ -23,6 +23,8 @@ export function AgentPairingPanel() {
   const error = useMcpPairingStore((state) => state.error);
   const refresh = useMcpPairingStore((state) => state.refresh);
   const createCode = useMcpPairingStore((state) => state.createCode);
+  const checkCode = useMcpPairingStore((state) => state.checkCode);
+  const pairedJustNow = useMcpPairingStore((state) => state.pairedJustNow);
   const revoke = useMcpPairingStore((state) => state.revoke);
   const rename = useMcpPairingStore((state) => state.rename);
   const rotate = useMcpPairingStore((state) => state.rotate);
@@ -41,13 +43,17 @@ export function AgentPairingPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
+  // Spending the code is also how a pairing succeeds, so the same question
+  // doubles as the "someone just paired" signal. `now` is deliberately not a
+  // dependency: putting it here rebuilt the timer every second and it never
+  // fired.
   useEffect(() => {
-    if (code === null || remainingSeconds(code.expiresAt, now) <= 0) return;
+    if (code === null) return;
     const timer = window.setInterval(() => {
-      void refresh();
+      void checkCode();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [code, now, refresh]);
+  }, [code, checkCode]);
 
   const codeRemaining = code ? remainingSeconds(code.expiresAt, now) : 0;
 
@@ -100,9 +106,15 @@ export function AgentPairingPanel() {
         <dd className="text-tokyo-fg">
           {code && codeRemaining > 0 ? (
             <div className="flex flex-wrap items-center gap-3">
-              <span className="rounded border border-tokyo-bg-hl bg-tokyo-bg px-3 py-1 font-mono text-lg tracking-widest text-tokyo-yellow">
+              <button
+                type="button"
+                className="rounded border border-tokyo-bg-hl bg-tokyo-bg px-3 py-1 font-mono text-lg tracking-widest text-tokyo-yellow hover:border-tokyo-yellow"
+                onClick={() => void createCode()}
+                disabled={busy}
+                title={t('settings.pairingCodeReroll')}
+              >
                 {code.code}
-              </span>
+              </button>
               <span className="text-xs text-tokyo-comment">
                 {t('settings.pairingCodeExpires', { seconds: codeRemaining })}
               </span>
@@ -123,6 +135,13 @@ export function AgentPairingPanel() {
           )}
         </dd>
       </dl>
+
+      {pairedJustNow && (
+        <p className="flex items-center gap-2 border-b border-tokyo-bg-hl bg-tokyo-green/10 px-4 py-2 text-xs text-tokyo-green">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          {t('settings.pairingJustPaired', { name: pairedJustNow })}
+        </p>
+      )}
 
       {error && (
         <p className="border-b border-tokyo-bg-hl px-4 py-2 text-xs text-tokyo-red">{error}</p>
