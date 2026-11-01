@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use axum::Router;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use zxyssh_core::mcp::pairing::{AgentSummary, IssuedAgent, PairingRegistry};
+use zxyssh_core::mcp::pairing::{AgentSummary, IssuedAgent, PairRequestSummary, PairingRegistry};
 use zxyssh_core::mcp::McpServer;
 use zxyssh_core::{Database, SessionManager};
 
@@ -201,7 +201,7 @@ pub enum McpCommand {
         #[command(subcommand)]
         command: CredentialCommand,
     },
-    /// Pair this machine with a running listener, reading the code from stdin
+    /// Pair this machine with a running listener
     Pair {
         /// Listener URL; defaults to the address published by the running service
         #[arg(long)]
@@ -212,6 +212,15 @@ pub enum McpCommand {
         /// Seconds to wait for the sealed credential to be delivered
         #[arg(long, default_value_t = 900)]
         wait: u64,
+        /// Ask the operator to approve this pairing instead of spending a code,
+        /// so no secret has to pass through the Agent's own chat log
+        #[arg(long)]
+        no_code: bool,
+    },
+    /// List and decide the codeless pairing requests waiting on an operator
+    Requests {
+        #[command(subcommand)]
+        command: RequestsCommand,
     },
 }
 
@@ -232,6 +241,24 @@ pub enum CredentialCommand {
     },
     /// Forget a saved server's credential
     Clear { server: String },
+}
+
+/// `zxyssh mcp requests …` — decide the pairings that arrived with no code.
+/// This is the headless equivalent of the desktop's approve button.
+#[derive(clap::Subcommand)]
+pub enum RequestsCommand {
+    /// List the requests waiting for a decision
+    List,
+    /// Approve one: its credential is created now and delivered to the Agent
+    Approve {
+        /// Request id or unambiguous id prefix
+        request: String,
+    },
+    /// Refuse one: nothing is ever issued for it
+    Reject {
+        /// Request id or unambiguous id prefix
+        request: String,
+    },
 }
 
 pub fn run(command: McpCommand) -> Result<()> {
@@ -281,6 +308,7 @@ pub fn run(command: McpCommand) -> Result<()> {
             endpoint,
             name,
             wait,
+            no_code,
         } => {
             let discovered = if endpoint.is_none() {
                 zxyssh_core::mcp::lan_status::read_status()
@@ -289,8 +317,13 @@ pub fn run(command: McpCommand) -> Result<()> {
                 None
             };
             let endpoint = resolve_pair_endpoint(endpoint, discovered);
-            pair_against_endpoint(&endpoint, &name, wait)
+            if no_code {
+                pair_by_request(&endpoint, &name, wait)
+            } else {
+                pair_against_endpoint(&endpoint, &name, wait)
+            }
         }
+        McpCommand::Requests { command } => requests(command),
         McpCommand::Rotate { agent } => match rotate(&agent)? {
             Some(issued) => {
                 println!("Agent {} was issued a new credential:", issued.name);
@@ -410,6 +443,73 @@ fn resolve_id(agents: &[AgentSummary], reference: &str) -> Result<String> {
     }
 }
 
+/// Resolve a full request id or an unambiguous prefix of one that is waiting.
+fn resolve_request(requests: &[PairRequestSummary], reference: &str) -> Result<String> {
+    let matches: Vec<&PairRequestSummary> = requests
+        .iter()
+        .filter(|request| request.id.starts_with(reference))
+        .collect();
+    match matches.len() {
+        1 => Ok(matches[0].id.clone()),
+        0 => bail!("No waiting pairing request id starts with {reference}"),
+        count => bail!("{count} requests match {reference}; use a longer id prefix"),
+    }
+}
+
+/// List and decide the pairings that arrived with no code. Approving is the
+/// moment a credential comes into existence, so a request that is never
+/// answered leaves nothing behind to revoke.
+fn requests(command: RequestsCommand) -> Result<()> {
+    let holder = registry(open_database()?)?;
+    let mut registry = lock(&holder)?;
+    match command {
+        RequestsCommand::List => {
+            let waiting = registry.pending_requests();
+            if waiting.is_empty() {
+                println!("No pairing requests are waiting.");
+                return Ok(());
+            }
+            for request in waiting {
+                println!(
+                    "{}  {:<24}  {}",
+                    request.id, request.peer, request.agent_name
+                );
+            }
+            Ok(())
+        }
+        RequestsCommand::Approve { request } => {
+            let id = resolve_request(&registry.pending_requests(), &request)?;
+            let now = unix_now();
+            match registry
+                .approve_request(&id, now)
+                .map_err(|error| anyhow::anyhow!("Could not approve the request: {error:?}"))?
+            {
+                Some(agent) => {
+                    println!(
+                        "Approved {} (agent id {}). It can now fetch its credential.",
+                        agent.name, agent.id
+                    );
+                    Ok(())
+                }
+                None => bail!("That request is no longer waiting for a decision"),
+            }
+        }
+        RequestsCommand::Reject { request } => {
+            let id = resolve_request(&registry.pending_requests(), &request)?;
+            let now = unix_now();
+            if registry
+                .reject_request(&id, now)
+                .map_err(|error| anyhow::anyhow!("Could not refuse the request: {error:?}"))?
+            {
+                println!("Refused. Nothing was issued.");
+                Ok(())
+            } else {
+                bail!("That request is no longer waiting for a decision")
+            }
+        }
+    }
+}
+
 /// Mint a one-time code for the next Agent. Safe to run while the service is
 /// already up: the service re-reads the registry before it consumes a code.
 pub fn pair_code() -> Result<String> {
@@ -476,6 +576,30 @@ fn pair_against_endpoint(endpoint: &str, name: &str, wait: u64) -> Result<()> {
         std::time::Duration::from_secs(wait),
         zxyssh_core::mcp::pair_client::DEFAULT_POLL_INTERVAL,
     ))?;
+    print_paired(&paired);
+    Ok(())
+}
+
+/// Ask for a pairing with no code in hand. The operator decides in the desktop
+/// or via `zxyssh mcp requests approve`, and the credential arrives sealed to a
+/// key generated here — so nothing secret passes through the Agent's chat log.
+fn pair_by_request(endpoint: &str, name: &str, wait: u64) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("Failed to create the pairing runtime")?;
+    println!("Asking {endpoint} to pair as {name}; waiting for an operator to approve it…");
+    let paired = runtime.block_on(zxyssh_core::mcp::pair_client::request_pairing(
+        endpoint,
+        name,
+        std::time::Duration::from_secs(wait),
+        zxyssh_core::mcp::pair_client::DEFAULT_POLL_INTERVAL,
+    ))?;
+    print_paired(&paired);
+    Ok(())
+}
+
+fn print_paired(paired: &zxyssh_core::mcp::pair_client::PairedAgent) {
     println!("Paired as {} (agent id {})", paired.name, paired.agent_id);
     println!(
         "Credential{}: {}",
@@ -487,7 +611,6 @@ fn pair_against_endpoint(endpoint: &str, name: &str, wait: u64) -> Result<()> {
         paired.token
     );
     println!("Shown once. Store it now; the service keeps only its hash.");
-    Ok(())
 }
 
 #[cfg(test)]

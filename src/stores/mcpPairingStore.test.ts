@@ -1,9 +1,11 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const safeInvoke = vi.fn();
-vi.mock('../lib/tauri', () => ({
-  safeInvoke: (...args: unknown[]) => safeInvoke(...args),
-}));
+vi.mock('../lib/tauri', () => {
+  return {
+    safeInvoke: (...args: unknown[]) => safeInvoke(...args),
+  };
+});
 
 import { useMcpPairingStore } from './mcpPairingStore';
 
@@ -23,11 +25,29 @@ const listener = {
   activeAgents: 1,
 };
 
+/**
+ * Answer every read `load()` performs, so a test only overrides what it cares
+ * about. An unlisted command is a mistake: `load()` has a fixed shape.
+ */
+function route(overrides: Record<string, () => Promise<unknown>> = {}) {
+  safeInvoke.mockImplementation((command: string) => {
+    const custom = overrides[command];
+    if (custom) return custom();
+    if (command === 'mcp_agents_list') return ok([]);
+    if (command === 'mcp_pair_requests_list') return ok([]);
+    if (command === 'mcp_lan_status') return ok(listener);
+    throw new Error(`unexpected Tauri command: ${command}`);
+  });
+}
+
+const calls = () => safeInvoke.mock.calls.map((call) => call[0]);
+
 beforeEach(() => {
   safeInvoke.mockReset();
   useMcpPairingStore.setState({
     code: null,
     agents: [],
+    requests: [],
     lanStatus: null,
     issuedToken: null,
     pairedJustNow: null,
@@ -36,26 +56,31 @@ beforeEach(() => {
   });
 });
 
-it('reads the Agents and the listener in one refresh', async () => {
-  safeInvoke
-    .mockImplementationOnce((command) => {
-      expect(command).toBe('mcp_agents_list');
-      return ok([{ id: 'a1', name: 'hermes-office', revoked: false }]);
-    })
-    .mockImplementationOnce((command) => {
-      expect(command).toBe('mcp_lan_status');
-      return ok(listener);
-    });
+it('reads the Agents, the waiting list and the listener in one refresh', async () => {
+  route({
+    mcp_agents_list: () => ok([{ id: 'a1', name: 'hermes-office', revoked: false }]),
+    mcp_pair_requests_list: () =>
+      ok([
+        {
+          id: 'r1',
+          agentName: 'opencode',
+          peer: '192.168.0.7:51234',
+          createdAt: 0,
+          expiresAt: 900,
+        },
+      ]),
+  });
 
   await useMcpPairingStore.getState().refresh();
   const state = useMcpPairingStore.getState();
   expect(state.agents[0].name).toBe('hermes-office');
+  expect(state.requests[0].agentName).toBe('opencode');
   expect(state.lanStatus?.bind).toBe('192.168.0.96:8765');
   expect(state.error).toBeNull();
 });
 
 it('treats a missing listener file as stopped, not as an error', async () => {
-  safeInvoke.mockImplementationOnce(() => ok([])).mockImplementationOnce(() => fail('no status file'));
+  route({ mcp_lan_status: () => fail('no status file') });
 
   await useMcpPairingStore.getState().refresh();
   const state = useMcpPairingStore.getState();
@@ -64,7 +89,9 @@ it('treats a missing listener file as stopped, not as an error', async () => {
 });
 
 it('surfaces a registry failure instead of pretending the list is empty', async () => {
-  safeInvoke.mockImplementationOnce(() => fail('Agent registry is unreadable and was not modified: x')).mockImplementationOnce(() => ok(null));
+  route({
+    mcp_agents_list: () => fail('Agent registry is unreadable and was not modified: x'),
+  });
 
   await useMcpPairingStore.getState().refresh();
   const state = useMcpPairingStore.getState();
@@ -73,52 +100,75 @@ it('surfaces a registry failure instead of pretending the list is empty', async 
 });
 
 it('re-reads the registry after a revocation and passes the id through', async () => {
-  safeInvoke
-    .mockImplementationOnce((command, args) => {
-      expect(command).toBe('mcp_agent_revoke');
-      expect(args).toEqual({ agentId: 'a1' });
-      return ok(true);
-    })
-    .mockImplementationOnce(() => ok([]))
-    .mockImplementationOnce(() => ok(null));
+  route({ mcp_agent_revoke: () => ok(true) });
 
   await useMcpPairingStore.getState().revoke('a1');
   expect(useMcpPairingStore.getState().error).toBeNull();
-  expect(safeInvoke.mock.calls.map((call) => call[0])).toEqual([
+  expect(calls()).toEqual([
     'mcp_agent_revoke',
     'mcp_agents_list',
+    'mcp_pair_requests_list',
+    'mcp_lan_status',
+  ]);
+  expect(safeInvoke.mock.calls[0][1]).toEqual({ agentId: 'a1' });
+});
+
+it('forgets a revoked record and reloads the list', async () => {
+  route({ mcp_agent_forget: () => ok(true) });
+
+  await useMcpPairingStore.getState().forget('bbbb2222');
+  expect(calls()).toEqual([
+    'mcp_agent_forget',
+    'mcp_agents_list',
+    'mcp_pair_requests_list',
+    'mcp_lan_status',
+  ]);
+  expect(safeInvoke.mock.calls[0][1]).toEqual({ agentId: 'bbbb2222' });
+});
+
+it('approving a request reloads so the new Agent appears at once', async () => {
+  route({ mcp_pair_request_approve: () => ok({ id: 'a2', name: 'opencode', revoked: false }) });
+
+  await useMcpPairingStore.getState().approveRequest('r1');
+  expect(calls()).toEqual([
+    'mcp_pair_request_approve',
+    'mcp_agents_list',
+    'mcp_pair_requests_list',
+    'mcp_lan_status',
+  ]);
+  expect(safeInvoke.mock.calls[0][1]).toEqual({ requestId: 'r1' });
+});
+
+it('rejecting a request reloads the waiting list', async () => {
+  route({ mcp_pair_request_reject: () => ok(true) });
+
+  await useMcpPairingStore.getState().rejectRequest('r1');
+  expect(calls()).toEqual([
+    'mcp_pair_request_reject',
+    'mcp_agents_list',
+    'mcp_pair_requests_list',
     'mcp_lan_status',
   ]);
 });
 
-it('forgets a revoked record and reloads the list', async () => {
-  safeInvoke
-    .mockImplementationOnce((command, args) => {
-      expect(command).toBe('mcp_agent_forget');
-      expect(args).toEqual({ agentId: 'bbbb2222' });
-      return ok(true);
-    })
-    .mockImplementationOnce(() => ok([]))
-    .mockImplementationOnce(() => ok(null));
+it('polls only the waiting list in the background', async () => {
+  route({
+    mcp_pair_requests_list: () =>
+      ok([{ id: 'r9', agentName: 'stranger', peer: '192.168.0.30:1', createdAt: 0, expiresAt: 9 }]),
+  });
 
-  await useMcpPairingStore.getState().forget('bbbb2222');
-  expect(safeInvoke.mock.calls.map((call) => call[0])).toEqual([
-    'mcp_agent_forget',
-    'mcp_agents_list',
-    'mcp_lan_status',
-  ]);
+  await useMcpPairingStore.getState().refreshRequests();
+  expect(calls()).toEqual(['mcp_pair_requests_list']);
+  expect(useMcpPairingStore.getState().requests[0].agentName).toBe('stranger');
 });
 
 it('leaves a code alone while the registry still has it armed', async () => {
   useMcpPairingStore.setState({ code: { code: '123456', expiresAt: 99 } });
-  safeInvoke.mockImplementationOnce((command) => {
-    expect(command).toBe('mcp_pair_code_pending');
-    return ok(true);
-  });
+  route({ mcp_pair_code_pending: () => ok(true) });
 
   await useMcpPairingStore.getState().checkCode();
   expect(useMcpPairingStore.getState().code?.code).toBe('123456');
-  expect(safeInvoke).toHaveBeenCalledTimes(1);
+  expect(calls()).toEqual(['mcp_pair_code_pending']);
 });
 
 it('drops a spent code and names the Agent that just paired', async () => {
@@ -126,15 +176,14 @@ it('drops a spent code and names the Agent that just paired', async () => {
     code: { code: '123456', expiresAt: 99 },
     agents: [{ id: 'a1', name: 'hermes-office', revoked: false }],
   });
-  safeInvoke
-    .mockImplementationOnce(() => ok(false))
-    .mockImplementationOnce(() =>
+  route({
+    mcp_pair_code_pending: () => ok(false),
+    mcp_agents_list: () =>
       ok([
         { id: 'a1', name: 'hermes-office', revoked: false },
         { id: 'b2', name: 'opencode-lan', revoked: false },
       ]),
-    )
-    .mockImplementationOnce(() => ok(listener));
+  });
 
   await useMcpPairingStore.getState().checkCode();
   const state = useMcpPairingStore.getState();

@@ -19,14 +19,22 @@ An operator mints a single-use six-digit code, either in the desktop app (Settin
 zxyssh mcp pair-code
 ```
 
-A correct code pairs immediately; there is no approval step:
+A correct code pairs immediately; nothing else is asked for:
 
 ```text
 POST /pair {"name":"<agent name>","code":"<six digits>"}
      -> 200 {"token":"..."}
 ```
 
-`zxyssh mcp pair --name <name>` is the reference client: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once. When run on the service host, it discovers the live listener address from zxySSH's local service status file; pass `--endpoint <url>` to pair from another machine or override that address.
+**Never ask the operator to type a pairing code into the chat, and never accept one that way.** The code is a credential, and a chat transcript is a log like any other. When you do not hold a code, open the pairing yourself and let a human approve it:
+
+```bash
+zxyssh mcp pair --name <agent name> --no-code
+```
+
+That posts `POST /pair/request {"name","clientPublicKey"}` and polls `/pair/status` until an operator approves it — in the desktop under Settings → **Agent access and pairing**, or headless with `zxyssh mcp requests list` then `requests approve <id>`. The credential then arrives sealed to a key you generated in the CLI, never in the clear. A request nobody approves expires after 900 seconds having issued nothing at all, so leaving it unanswered is safe.
+
+`zxyssh mcp pair --name <name>` is the reference client for the code path: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once. When run on the service host, it discovers the live listener address from zxySSH's local service status file; pass `--endpoint <url>` to pair from another machine or override that address.
 
 A client that offers `clientPublicKey` gets that credential sealed rather than printed in the response, which is what keeps it safe on a plain-HTTP listener:
 

@@ -21,9 +21,19 @@ export interface LanListenerStatus {
   activeAgents: number;
 }
 
+/** A codeless pairing request waiting on the operator's decision. */
+export interface PairRequest {
+  id: string;
+  agentName: string;
+  peer: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 interface PairingState {
   code: PairingCode | null;
   agents: PairedAgent[];
+  requests: PairRequest[];
   lanStatus: LanListenerStatus | null;
   /** A replacement credential is shown once, then dropped from memory. */
   issuedToken: string | null;
@@ -32,8 +42,11 @@ interface PairingState {
   busy: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  refreshRequests: () => Promise<void>;
   createCode: () => Promise<void>;
   checkCode: () => Promise<void>;
+  approveRequest: (requestId: string) => Promise<void>;
+  rejectRequest: (requestId: string) => Promise<void>;
   revoke: (agentId: string) => Promise<void>;
   forget: (agentId: string) => Promise<void>;
   rename: (agentId: string, name: string) => Promise<void>;
@@ -43,8 +56,9 @@ interface PairingState {
 
 export const useMcpPairingStore = create<PairingState>((set, get) => {
   const load = async () => {
-    const [agents, lan] = await Promise.all([
+    const [agents, requests, lan] = await Promise.all([
       safeInvoke<PairedAgent[]>('mcp_agents_list'),
+      safeInvoke<PairRequest[]>('mcp_pair_requests_list'),
       safeInvoke<LanListenerStatus | null>('mcp_lan_status'),
     ]);
     if (!agents.success) {
@@ -53,6 +67,7 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
     }
     set({
       agents: agents.data,
+      requests: requests.success ? requests.data : [],
       // A missing listener status file means "not running", not an error.
       lanStatus: lan.success ? lan.data : null,
       error: null,
@@ -80,6 +95,7 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
   return {
     code: null,
     agents: [],
+    requests: [],
     lanStatus: null,
     issuedToken: null,
     pairedJustNow: null,
@@ -93,6 +109,18 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
         await load();
       } finally {
         set({ busy: false });
+      }
+    },
+
+    /**
+     * Background poll for requests an Agent may open at any moment. It never
+     * takes the busy flag, because it must not block the operator's own click
+     * behind a timer tick.
+     */
+    refreshRequests: async () => {
+      const requests = await safeInvoke<PairRequest[]>('mcp_pair_requests_list');
+      if (requests.success) {
+        set({ requests: requests.data });
       }
     },
 
@@ -129,6 +157,15 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
       await load();
       const arrived = get().agents.find((agent) => !known.has(agent.id) && !agent.revoked);
       set({ code: null, pairedJustNow: arrived?.name ?? null });
+    },
+
+    /** Approving is what creates the credential; nothing exists before the click. */
+    approveRequest: async (requestId) => {
+      await write('mcp_pair_request_approve', { requestId });
+    },
+
+    rejectRequest: async (requestId) => {
+      await write('mcp_pair_request_reject', { requestId });
     },
 
     revoke: async (agentId) => {

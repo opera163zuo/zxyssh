@@ -83,6 +83,63 @@ pub async fn pair(
     }
     let request_id =
         field(&body, "requestId").ok_or_else(|| anyhow!("pairing response had no requestId"))?;
+    await_delivery(&client, endpoint, &request_id, key_pair, name, wait, poll).await
+}
+
+/// Ask a listener to pair this machine with no code in hand. Nothing exists for
+/// this Agent until an operator approves the request, so the caller waits —
+/// which is the point: no secret has to travel through the Agent's own chat log
+/// for the pairing to happen.
+pub async fn request_pairing(
+    endpoint: &str,
+    name: &str,
+    wait: Duration,
+    poll: Duration,
+) -> Result<PairedAgent> {
+    let endpoint = endpoint.trim_end_matches('/');
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("build pairing client")?;
+    let key_pair = pair_crypto::ephemeral_private_key()?;
+
+    let response = client
+        .post(format!("{endpoint}/pair/request"))
+        .json(&json!({ "name": name, "clientPublicKey": public_key_b64(&key_pair)? }))
+        .send()
+        .await
+        .context("pairing request failed")?;
+    let status = response.status();
+    let body_text = response.text().await.context("read pairing response")?;
+    if status != reqwest::StatusCode::ACCEPTED {
+        return Err(anyhow!(
+            "pairing request was refused with HTTP {}: {}",
+            status.as_u16(),
+            body_text.trim()
+        ));
+    }
+    let body: Value = serde_json::from_str(&body_text).with_context(|| {
+        format!(
+            "pairing request returned HTTP {} in an unreadable shape",
+            status.as_u16()
+        )
+    })?;
+    let request_id = field(&body, "requestId")
+        .ok_or_else(|| anyhow!("pairing request response had no requestId"))?;
+    await_delivery(&client, endpoint, &request_id, key_pair, name, wait, poll).await
+}
+
+/// Poll until the service hands over the credential, exactly once.
+#[allow(clippy::too_many_arguments)]
+async fn await_delivery(
+    client: &reqwest::Client,
+    endpoint: &str,
+    request_id: &str,
+    key_pair: ring::agreement::EphemeralPrivateKey,
+    name: &str,
+    wait: Duration,
+    poll: Duration,
+) -> Result<PairedAgent> {
     let deadline = std::time::Instant::now() + wait;
     loop {
         if std::time::Instant::now() >= deadline {
@@ -121,12 +178,9 @@ pub async fn pair(
         match field(&body, "status").as_deref() {
             Some("delivered") => {
                 let token = match (field(&body, "sealedToken"), field(&body, "serverPublicKey")) {
-                    (Some(sealed), Some(server_public_key)) => pair_crypto::open_sealed(
-                        key_pair,
-                        &server_public_key,
-                        &request_id,
-                        &sealed,
-                    )?,
+                    (Some(sealed), Some(server_public_key)) => {
+                        pair_crypto::open_sealed(key_pair, &server_public_key, request_id, &sealed)?
+                    }
                     _ => field(&body, "token")
                         .ok_or_else(|| anyhow!("approved pairing carried no credential"))?,
                 };
@@ -137,7 +191,9 @@ pub async fn pair(
                     token,
                 });
             }
-            Some("rejected") => return Err(anyhow!("the operator rejected this pairing request")),
+            Some("refused") | Some("rejected") => {
+                return Err(anyhow!("an operator refused this pairing request"))
+            }
             Some("expired") => {
                 return Err(anyhow!(
                     "the pairing request expired before an operator approved it"

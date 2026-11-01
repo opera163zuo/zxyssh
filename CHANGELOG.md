@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### An Agent can now ask to be paired, without being handed a code
+
+A modern Agent will refuse to take a pairing code through its own chat log, and
+it is right to: the code is a credential, so a transcript — and whatever server
+keeps it — becomes a place where a secret sat. That left no way at all to
+onboard such an Agent.
+
+`zxyssh mcp pair --name hermes --no-code` now opens the pairing itself. It posts
+`POST /pair/request {"name","clientPublicKey"}`, which creates **nothing**, and
+waits. The desktop puts it directly in the **Agent list**, above the paired
+records, with an **等待同意** badge, the source address and its expiry countdown;
+the same row has approve and reject buttons. Headless, `zxyssh mcp requests list`
+and `requests approve <id>` do the same job. The credential comes into existence at
+the moment of approval and arrives sealed to a key generated on the Agent's
+side, so this door never carries a credential in the clear — which is why the key
+is required rather than optional. A request nobody answers expires after 900
+seconds having issued nothing, and refusing one leaves nothing to revoke.
+
+The code door is unchanged and still the default way in: a correct six-digit
+code pairs immediately, with no approval step, because an unattended host cannot
+wait for somebody to click. One peer may queue three requests and twenty exist
+in total, so nobody can bury the approve button.
+
 ### A revoked Agent can finally leave the list
 
 `revoke` marked a record and left it in Settings forever, so after a handful of

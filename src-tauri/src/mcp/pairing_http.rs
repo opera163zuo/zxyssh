@@ -44,6 +44,17 @@ pub struct PairPollRequest {
     request_id: String,
 }
 
+/// Body of a codeless pairing request. The key is required, not optional: a
+/// request that will be answered by a human must not be able to come back
+/// carrying its credential in the clear.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConsentRequest {
+    name: String,
+    #[serde(alias = "clientPublicKey")]
+    client_public_key: String,
+}
+
 /// Reject pairing floods before they reach a code's own attempt counter.
 /// Pairing codes are six digits, so this is the outer bound on guessing.
 #[derive(Default)]
@@ -157,9 +168,9 @@ pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Res
         Ok(registry) => registry,
         Err(_) => return registry_unavailable(),
     };
-    // Codes are minted by `zxyssh mcp pair-code` and approved in the desktop UI,
-    // both separate processes, so read the persisted registry before consuming
-    // one and before deciding whether a request is already queued.
+    // Codes are minted by `zxyssh mcp pair-code` and by the desktop UI, which are
+    // separate processes from this listener, so read the persisted registry
+    // before consuming one and before deciding whether a request is queued.
     if registry.reload().is_err() {
         return registry_unavailable();
     }
@@ -203,6 +214,76 @@ pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Res
         ),
         Err(PairingError::Storage(_)) => registry_unavailable(),
         Err(_) => reject(StatusCode::UNAUTHORIZED, "Pairing code rejected"),
+    }
+}
+
+/// Start a pairing with no code. The request waits on the operator's approve
+/// button — in the desktop or via `zxyssh mcp requests approve` — and no
+/// credential exists until it is pressed. This is the path for an Agent that
+/// must not be handed a secret through its own chat log.
+pub async fn handle_pair_request(State(state): State<McpState>, request: Request) -> Response {
+    let Some(registry) = &state.pairing_registry else {
+        return reject(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Pairing registry unavailable",
+        );
+    };
+
+    let peer = peer_key(&request);
+    let allowed = state
+        .pairing_limiter
+        .lock()
+        .map(|mut limiter| limiter.allow(&peer, now_seconds()))
+        .unwrap_or(false);
+    if !allowed {
+        return reject(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many pairing attempts, retry shortly",
+        );
+    }
+
+    let body = match Json::<ConsentRequest>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            return reject(
+                StatusCode::BAD_REQUEST,
+                "Expected a JSON body with name and clientPublicKey",
+            )
+        }
+    };
+
+    let mut registry = match lock_registry(registry) {
+        Ok(registry) => registry,
+        Err(_) => return registry_unavailable(),
+    };
+    // The operator may approve from another process, so read the persisted
+    // registry before queueing and before counting what is already waiting.
+    if registry.reload().is_err() {
+        return registry_unavailable();
+    }
+    let now = chrono::Utc::now().timestamp();
+    match registry.begin_request(&body.name, &body.client_public_key, &peer, now) {
+        Ok(request_id) => no_store(
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "requestId": request_id,
+                    "status": "awaiting_consent",
+                    "pollPath": "/pair/status",
+                })),
+            )
+                .into_response(),
+        ),
+        Err(PairingError::InvalidName) => reject(StatusCode::BAD_REQUEST, "Agent name is required"),
+        Err(PairingError::InvalidClientKey) => reject(
+            StatusCode::BAD_REQUEST,
+            "clientPublicKey is required and must be a base64url-encoded 32-byte X25519 key",
+        ),
+        Err(PairingError::TooManyRequests) => reject(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many pairing requests are already waiting for the operator",
+        ),
+        Err(_) => registry_unavailable(),
     }
 }
 
@@ -272,6 +353,8 @@ fn status_name(status: PairRequestStatus) -> &'static str {
         // The wire name stays `awaiting_approval` so Agents written against 2.1.0
         // keep parsing it; the state now means "sealing, poll again".
         PairRequestStatus::AwaitingDelivery => "awaiting_approval",
+        PairRequestStatus::AwaitingConsent => "awaiting_consent",
+        PairRequestStatus::Refused => "refused",
         PairRequestStatus::Approved => "approved",
         PairRequestStatus::Delivered => "delivered",
         PairRequestStatus::Expired => "expired",
@@ -293,7 +376,10 @@ pub async fn require_paired_agent(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    if matches!(path.as_str(), "/pair" | "/pair/status" | "/health") {
+    if matches!(
+        path.as_str(),
+        "/pair" | "/pair/request" | "/pair/status" | "/health"
+    ) {
         return no_store(next.run(request).await);
     }
 

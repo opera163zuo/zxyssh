@@ -11,6 +11,13 @@ vi.mock('react-i18next', () => ({
 const defaults = {
   code: null,
   agents: [] as { id: string; name: string; revoked: boolean }[],
+  requests: [] as {
+    id: string;
+    agentName: string;
+    peer: string;
+    createdAt: number;
+    expiresAt: number;
+  }[],
   lanStatus: null,
   issuedToken: null,
   pairedJustNow: null,
@@ -22,8 +29,11 @@ beforeEach(() => {
   useMcpPairingStore.setState({
     ...defaults,
     refresh: vi.fn(async () => {}),
+    refreshRequests: vi.fn(async () => {}),
     createCode: vi.fn(async () => {}),
     checkCode: vi.fn(async () => {}),
+    approveRequest: vi.fn(async () => {}),
+    rejectRequest: vi.fn(async () => {}),
     revoke: vi.fn(async () => {}),
     forget: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
@@ -65,6 +75,28 @@ it('rerolls a live code on click and announces an Agent that just paired', () =>
   useMcpPairingStore.setState({ ...defaults, pairedJustNow: 'opencode-lan' });
   render(<AgentPairingPanel />);
   expect(screen.getByText('settings.pairingJustPaired')).toBeInTheDocument();
+});
+
+it('shows a codeless request with its address and offers approve or reject', () => {
+  useMcpPairingStore.setState({
+    ...defaults,
+    requests: [
+      {
+        id: 'r1',
+        agentName: 'opencode',
+        peer: '192.168.0.7:51234',
+        createdAt: 0,
+        expiresAt: Math.floor(Date.now() / 1000) + 300,
+      },
+    ],
+  });
+  render(<AgentPairingPanel />);
+  expect(screen.getByText('opencode')).toBeInTheDocument();
+  expect(screen.getByText(/192\.168\.0\.7:51234/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRequestApprove' }));
+  expect(useMcpPairingStore.getState().approveRequest).toHaveBeenCalledWith('r1');
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRequestReject' }));
+  expect(useMcpPairingStore.getState().rejectRequest).toHaveBeenCalledWith('r1');
 });
 
 it('lets the operator rename and rotate a live Agent, and delete only a revoked one', () => {
