@@ -93,6 +93,30 @@ fn frontend_uses_zxyssh_favicon() {
     );
 }
 
+/// `app-icon.svg` at the workspace root is the source `tauri icon` renders the
+/// bundle from; `public/app-icon.svg` is the copy the title bar and browser tab
+/// actually load. Redrawing one without the other silently leaves the old mark
+/// on screen, so they are required to be the same bytes.
+#[test]
+fn webview_icon_matches_the_icon_source() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("src-tauri must live under workspace root")
+        .to_path_buf();
+
+    let source_path = workspace_root.join("app-icon.svg");
+    let served_path = workspace_root.join("public").join("app-icon.svg");
+    let source = fs::read(&source_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", source_path.display()));
+    let served = fs::read(&served_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", served_path.display()));
+
+    assert_eq!(
+        source, served,
+        "public/app-icon.svg must stay a copy of the icon source"
+    );
+}
+
 #[test]
 fn tauri_bundle_packages_linux_and_ships_no_windows_assets() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
