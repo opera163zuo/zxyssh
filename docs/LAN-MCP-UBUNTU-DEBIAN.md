@@ -98,10 +98,25 @@ command; it reads the code from stdin, collects the credential (sealed when it
 offers a key) and prints it once:
 
 ```bash
-~/.local/bin/zxyssh mcp pair --endpoint http://192.168.0.96:8765 --name hermes-laptop
+~/.local/bin/zxyssh mcp pair --name hermes-laptop
 ```
 
-Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/pair` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display.
+An Agent that must not be handed a code — because a chat transcript is a log like
+any other — opens the pairing itself and waits for a human instead:
+
+```bash
+~/.local/bin/zxyssh mcp pair --name hermes-laptop --no-code
+```
+
+That posts `POST /pair/request {"name","clientPublicKey"}`, which creates
+**nothing**: the request waits in the desktop under Settings → **Agent access and
+pairing**, or headless in `zxyssh mcp requests list`. `requests approve <id>`
+creates the credential at that moment and the Agent's poll picks it up sealed;
+`requests reject <id>` leaves nothing to revoke. An unapproved request expires
+after 900 seconds having issued nothing. The key is mandatory on this path, so
+unlike the code path it can never deliver a credential in the clear.
+
+Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/pair`, `/pair/request` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display, and `mcp pair` reads that file when `--endpoint` is omitted.
 
 ```bash
 ~/.local/bin/zxyssh mcp agents

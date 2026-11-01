@@ -142,6 +142,26 @@ TOKEN=$(pair "smoke-loopback" "$CODE" "$LB")
 [ "${#TOKEN}" = "47" ] || fail "pairing returned no token: ${TOKEN:0:6}…"
 ok "a sealed pairing returned a 47-character Agent token"
 
+# A pairing with no code must create nothing until a human answers it.
+CONSENT_BODY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/request" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"smoke-consent\",\"clientPublicKey\":\"$(client_key)\"}")
+expect "a codeless request waits for an operator" "$(printf '%s' "$CONSENT_BODY" | json status)" "awaiting_consent"
+REQ_ID=$(printf '%s' "$CONSENT_BODY" | json requestId)
+XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | grep -q smoke-consent \
+  && fail "an unapproved request created an Agent" \
+  || ok "an unapproved request created no Agent"
+expect "polling before approval" \
+  "$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" -H 'Content-Type: application/json' \
+      -d "{\"requestId\":\"$REQ_ID\"}" | json status)" "awaiting_consent"
+XDG_DATA_HOME="$LB" "$BIN" mcp requests approve "$REQ_ID" >/dev/null \
+  || fail "could not approve request $REQ_ID"
+XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | grep -q smoke-consent \
+  && ok "approval is what creates the credential" \
+  || fail "approving the request issued no Agent"
+CONSENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-consent/{print $1}')
+XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${CONSENT_ID:0:8}" >/dev/null
+
 EP=127.0.0.1:$PORT
 expect "initialize" "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json result serverInfo name)" "zxyssh"
 expect "notifications/initialized body" \
