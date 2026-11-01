@@ -15,6 +15,16 @@ wrapped every CJK label onto two lines (**重命/名**, **轮换/凭据**, **吊
 They are icons now — pencil, key, ban — with the wording as the tooltip and the
 accessible name, and a revoked row carries the single delete control it needs.
 
+### The icon stopped quoting the old name
+
+The mark was a downward **V** on a dark tile, drawn before the vibeshell →
+zxySSH rename, and it meant nothing to the product. It is a terminal prompt
+now: a chevron with a cursor after it, keeping the same dark tile, hairline
+border and teal accent so it still reads as the same application. The favicon,
+the 32/64/128/128@2x taskbar set and the macOS bundle icon were regenerated
+from the new source; the Windows and Android/iOS assets `tauri icon` also
+writes are deleted again, because this repository ships Linux only.
+
 ## 2.3.0 — 2026-11-01
 
 ### Pairing follows the listener address
