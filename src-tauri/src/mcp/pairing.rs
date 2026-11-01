@@ -11,6 +11,9 @@ pub enum PairingError {
     /// pairing code is spent, so a malformed body cannot burn a code and then
     /// fail to deliver.
     InvalidClientKey,
+    /// A record may only be deleted once its credential is revoked, so removing
+    /// an entry can never silently drop a credential an Agent is still using.
+    StillActive,
     /// The registry could not be written. The in-memory change is rolled back.
     Storage(String),
     /// The persisted registry could not be read or decrypted. Callers must
@@ -539,6 +542,22 @@ impl PairingRegistry {
         .map(|()| true)
     }
 
+    /// Delete a revoked Agent's record so the operator's list does not grow
+    /// without bound. An active credential must be revoked first: deleting a
+    /// live record would silently drop a credential its holder is still using
+    /// while leaving its history behind.
+    pub fn forget(&mut self, id: &str) -> Result<bool, PairingError> {
+        match self.state.agents.get(id) {
+            None => Ok(false),
+            Some(agent) if !agent.revoked => Err(PairingError::StillActive),
+            Some(_) => self
+                .apply(|state| {
+                    state.agents.remove(id);
+                })
+                .map(|()| true),
+        }
+    }
+
     pub fn rename(&mut self, id: &str, name: &str) -> Result<bool, PairingError> {
         let name = name.trim();
         if name.is_empty() || name.len() > 80 {
@@ -724,6 +743,22 @@ mod tests {
         assert!(registry.revoke(&issued.id).unwrap());
         assert_eq!(registry.authenticate(&issued.token), None);
         assert_eq!(registry.active_agent_count(), 0);
+    }
+
+    #[test]
+    fn only_a_revoked_agent_can_be_forgotten() {
+        let mut registry = PairingRegistry::new();
+        let code = registry.create_code(NOW).unwrap();
+        let issued = registry.pair("forget-me", &code, NOW).unwrap();
+        assert!(matches!(
+            registry.forget(&issued.id),
+            Err(PairingError::StillActive)
+        ));
+        assert!(registry.list().iter().any(|agent| agent.id == issued.id));
+        registry.revoke(&issued.id).unwrap();
+        assert!(registry.forget(&issued.id).unwrap());
+        assert!(registry.list().is_empty());
+        assert!(!registry.forget(&issued.id).unwrap());
     }
 
     #[test]

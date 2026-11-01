@@ -35,6 +35,7 @@ interface PairingState {
   createCode: () => Promise<void>;
   checkCode: () => Promise<void>;
   revoke: (agentId: string) => Promise<void>;
+  forget: (agentId: string) => Promise<void>;
   rename: (agentId: string, name: string) => Promise<void>;
   rotate: (agentId: string) => Promise<void>;
   dismissIssuedToken: () => void;
@@ -132,6 +133,10 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
 
     revoke: async (agentId) => {
       await write('mcp_agent_revoke', { agentId });
+    },
+
+    forget: async (agentId) => {
+      await write('mcp_agent_forget', { agentId });
     },
 
     rename: async (agentId, name) => {

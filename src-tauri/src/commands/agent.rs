@@ -145,6 +145,7 @@ fn registry_error(error: PairingError) -> String {
         PairingError::InvalidClientKey => {
             "clientPublicKey must be a base64url-encoded 32-byte X25519 key".to_string()
         }
+        PairingError::StillActive => "Revoke this Agent before deleting its record".to_string(),
     }
 }
 
@@ -191,6 +192,14 @@ pub fn mcp_pair_code_pending(db: State<'_, Arc<Database>>) -> Result<bool, Strin
 pub fn mcp_agent_revoke(db: State<'_, Arc<Database>>, agent_id: String) -> Result<bool, String> {
     let mut registry = registry(&db)?;
     registry.revoke(&agent_id).map_err(registry_error)
+}
+
+/// Remove a revoked Agent's record from the registry. Active credentials have
+/// to be revoked first, so this can never retire a live Agent by accident.
+#[tauri::command]
+pub fn mcp_agent_forget(db: State<'_, Arc<Database>>, agent_id: String) -> Result<bool, String> {
+    let mut registry = registry(&db)?;
+    registry.forget(&agent_id).map_err(registry_error)
 }
 
 #[tauri::command]

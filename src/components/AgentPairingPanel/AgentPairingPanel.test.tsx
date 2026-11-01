@@ -25,6 +25,7 @@ beforeEach(() => {
     createCode: vi.fn(async () => {}),
     checkCode: vi.fn(async () => {}),
     revoke: vi.fn(async () => {}),
+    forget: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     rotate: vi.fn(async () => {}),
     dismissIssuedToken: vi.fn(),
@@ -66,7 +67,7 @@ it('rerolls a live code on click and announces an Agent that just paired', () =>
   expect(screen.getByText('settings.pairingJustPaired')).toBeInTheDocument();
 });
 
-it('lets the operator rename, rotate and revoke a live Agent but not a revoked one', () => {
+it('lets the operator rename and rotate a live Agent, and delete only a revoked one', () => {
   useMcpPairingStore.setState({
     agents: [
       { id: 'aaaa1111', name: 'hermes-office', revoked: false },
@@ -74,15 +75,18 @@ it('lets the operator rename, rotate and revoke a live Agent but not a revoked o
     ],
   });
   render(<AgentPairingPanel />);
-  expect(screen.getByText('settings.pairingRevoke')).toBeInTheDocument();
-  fireEvent.click(screen.getByText('settings.pairingRotate'));
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRotate' }));
   expect(useMcpPairingStore.getState().rotate).toHaveBeenCalledWith('aaaa1111');
-  fireEvent.click(screen.getByText('settings.pairingRename'));
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRename' }));
   fireEvent.change(screen.getByDisplayValue('hermes-office'), { target: { value: 'hermes-desk' } });
   fireEvent.submit(screen.getByDisplayValue('hermes-desk').closest('form') as HTMLElement);
   expect(useMcpPairingStore.getState().rename).toHaveBeenCalledWith('aaaa1111', 'hermes-desk');
-  // The revoked row offers no actions at all.
-  expect(screen.getAllByText('settings.pairingRevoke')).toHaveLength(1);
+  // Actions are icon-only now, so the accessible name is the tooltip text: a
+  // live row offers no delete, and exactly one delete exists for the revoked row.
+  expect(screen.getAllByRole('button', { name: 'settings.pairingRevoke' })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'settings.pairingForget' })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingForget' }));
+  expect(useMcpPairingStore.getState().forget).toHaveBeenCalledWith('bbbb2222');
 });
 
 it('shows a rotated credential until it is dismissed', () => {

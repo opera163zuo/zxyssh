@@ -316,6 +316,7 @@
     "pairingSave": "Save",
     "pairingRotate": "Rotate credential",
     "pairingRevoke": "Revoke",
+    "pairingForget": "Delete this revoked record",
     "about": "About",
     "aboutDesc": "Information about zxySSH.",
     "appTitle": "zxySSH",

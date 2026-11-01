@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { KeyRound, Link2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
+import { Ban, KeyRound, Link2, Pencil, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 
 import {
   useMcpPairingStore,
@@ -26,6 +26,7 @@ export function AgentPairingPanel() {
   const checkCode = useMcpPairingStore((state) => state.checkCode);
   const pairedJustNow = useMcpPairingStore((state) => state.pairedJustNow);
   const revoke = useMcpPairingStore((state) => state.revoke);
+  const forget = useMcpPairingStore((state) => state.forget);
   const rename = useMcpPairingStore((state) => state.rename);
   const rotate = useMcpPairingStore((state) => state.rotate);
   const dismissIssuedToken = useMcpPairingStore((state) => state.dismissIssuedToken);
@@ -178,6 +179,7 @@ export function AgentPairingPanel() {
                   void rename(agent.id, name);
                 }}
                 onRevoke={() => void revoke(agent.id)}
+                onForget={() => void forget(agent.id)}
                 onRotate={() => void rotate(agent.id)}
               />
             ))}
@@ -197,6 +199,7 @@ function AgentRow({
   onCancelEdit,
   onSaveName,
   onRevoke,
+  onForget,
   onRotate,
 }: {
   agent: PairedAgent;
@@ -206,6 +209,7 @@ function AgentRow({
   onCancelEdit: () => void;
   onSaveName: (name: string) => void;
   onRevoke: () => void;
+  onForget: () => void;
   onRotate: () => void;
 }) {
   const { t } = useTranslation();
@@ -251,20 +255,55 @@ function AgentRow({
           {agent.id.slice(0, 8)}
         </div>
       </div>
-      {!agent.revoked && (
-        <div className="flex items-center gap-2">
-          <button type="button" className="icon-button" disabled={busy} onClick={() => onEdit(agent.name)}>
-            {t('settings.pairingRename')}
+      {/* Icons only: a CJK label in a narrow flex row wraps to two lines and
+          makes every row look broken. */}
+      <div className="flex shrink-0 items-center gap-1">
+        {agent.revoked ? (
+          <button
+            type="button"
+            className="icon-button"
+            disabled={busy}
+            onClick={onForget}
+            title={t('settings.pairingForget')}
+            aria-label={t('settings.pairingForget')}
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
-          <button type="button" className="icon-button" disabled={busy} onClick={onRotate}>
-            {t('settings.pairingRotate')}
-          </button>
-          <button type="button" className="icon-button" disabled={busy} onClick={onRevoke}>
-            <Trash2 className="h-4 w-4 text-tokyo-red" />
-            {t('settings.pairingRevoke')}
-          </button>
-        </div>
-      )}
+        ) : (
+          <>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              onClick={() => onEdit(agent.name)}
+              title={t('settings.pairingRename')}
+              aria-label={t('settings.pairingRename')}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              onClick={onRotate}
+              title={t('settings.pairingRotate')}
+              aria-label={t('settings.pairingRotate')}
+            >
+              <KeyRound className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              onClick={onRevoke}
+              title={t('settings.pairingRevoke')}
+              aria-label={t('settings.pairingRevoke')}
+            >
+              <Ban className="h-4 w-4 text-tokyo-red" />
+            </button>
+          </>
+        )}
+      </div>
     </li>
   );
 }
