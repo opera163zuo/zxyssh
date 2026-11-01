@@ -159,19 +159,40 @@ export function AgentPairingPanel() {
         </p>
       )}
 
-      {requests.length > 0 && (
-        <div className="border-b border-tokyo-bg-hl bg-tokyo-yellow/5 px-4 py-3">
-          <h4 className="text-xs font-medium uppercase tracking-wide text-tokyo-comment">
-            {t('settings.pairingRequests')}
-          </h4>
+      {error && (
+        <p className="border-b border-tokyo-bg-hl px-4 py-2 text-xs text-tokyo-red">{error}</p>
+      )}
+
+      {issuedToken && (
+        <div className="flex flex-wrap items-center gap-3 border-b border-tokyo-bg-hl bg-tokyo-bg/60 px-4 py-3">
+          <span className="text-xs text-tokyo-yellow">{t('settings.pairingTokenOnce')}</span>
+          <code className="break-all font-mono text-xs text-tokyo-fg">{issuedToken}</code>
+          <button type="button" className="icon-button" onClick={dismissIssuedToken}>
+            {t('settings.pairingTokenDone')}
+          </button>
+        </div>
+      )}
+
+      <div className="px-4 py-3">
+        <h4 className="text-xs font-medium uppercase tracking-wide text-tokyo-comment">
+          {t('settings.pairingAgents')}
+        </h4>
+        {agents.length === 0 && requests.length === 0 ? (
+          <p className="mt-2 text-xs text-tokyo-comment">{t('settings.pairingNoAgents')}</p>
+        ) : (
           <ul className="mt-2 space-y-2">
             {requests.map((request) => (
               <li
-                key={request.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded border border-tokyo-bg-hl bg-tokyo-bg px-3 py-2"
+                key={`request-${request.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 rounded border border-tokyo-yellow/50 bg-tokyo-bg px-3 py-2"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-sm text-tokyo-fg">{request.agentName}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm text-tokyo-fg">{request.agentName}</span>
+                    <span className="rounded border border-tokyo-yellow/60 px-1.5 text-xs text-tokyo-yellow">
+                      {t('settings.pairingRequestPending')}
+                    </span>
+                  </div>
                   <div className="font-mono text-xs text-tokyo-comment">
                     {request.peer} ·{' '}
                     {t('settings.pairingRequestExpiresIn', {
@@ -203,35 +224,9 @@ export function AgentPairingPanel() {
                 </div>
               </li>
             ))}
-          </ul>
-        </div>
-      )}
-
-      {error && (
-        <p className="border-b border-tokyo-bg-hl px-4 py-2 text-xs text-tokyo-red">{error}</p>
-      )}
-
-      {issuedToken && (
-        <div className="flex flex-wrap items-center gap-3 border-b border-tokyo-bg-hl bg-tokyo-bg/60 px-4 py-3">
-          <span className="text-xs text-tokyo-yellow">{t('settings.pairingTokenOnce')}</span>
-          <code className="break-all font-mono text-xs text-tokyo-fg">{issuedToken}</code>
-          <button type="button" className="icon-button" onClick={dismissIssuedToken}>
-            {t('settings.pairingTokenDone')}
-          </button>
-        </div>
-      )}
-
-      <div className="px-4 py-3">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-tokyo-comment">
-          {t('settings.pairingAgents')}
-        </h4>
-        {agents.length === 0 ? (
-          <p className="mt-2 text-xs text-tokyo-comment">{t('settings.pairingNoAgents')}</p>
-        ) : (
-          <ul className="mt-2 space-y-2">
             {agents.map((agent) => (
               <AgentRow
-                key={agent.id}
+                key={`agent-${agent.id}`}
                 agent={agent}
                 busy={busy}
                 editing={editing?.id === agent.id ? editing.name : null}

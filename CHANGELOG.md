@@ -11,9 +11,10 @@ onboard such an Agent.
 
 `zxyssh mcp pair --name hermes --no-code` now opens the pairing itself. It posts
 `POST /pair/request {"name","clientPublicKey"}`, which creates **nothing**, and
-waits. The desktop shows the name, the source address and how long it has left,
-with an approve button; headless, `zxyssh mcp requests list` and
-`requests approve <id>` do the same job. The credential comes into existence at
+waits. The desktop puts it directly in the **Agent list**, above the paired
+records, with an **等待同意** badge, the source address and its expiry countdown;
+the same row has approve and reject buttons. Headless, `zxyssh mcp requests list`
+and `requests approve <id>` do the same job. The credential comes into existence at
 the moment of approval and arrives sealed to a key generated on the Agent's
 side, so this door never carries a credential in the clear — which is why the key
 is required rather than optional. A request nobody answers expires after 900
