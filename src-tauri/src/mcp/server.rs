@@ -37,7 +37,8 @@ use super::approval::{AgentApprovalManager, ApprovalOutcome, ApprovalRequest};
 use super::guard::{self, GuardConfig, GUARD_CONFIG_KEY};
 use super::pairing::{AuthenticatedAgent, PairingRegistry};
 use super::pairing_http::{
-    audit_label, handle_pair, handle_pair_status, require_paired_agent, PairRateLimiter,
+    audit_label, handle_pair, handle_pair_request, handle_pair_status, require_paired_agent,
+    PairRateLimiter,
 };
 use super::tools::{
     get_compact_agent_tool_definitions, get_compact_tool_definitions, is_agent_tool,
@@ -329,14 +330,16 @@ impl McpServer {
     }
 
     /// HTTP surface for a LAN-facing service: every MCP route requires a paired
-    /// Agent bearer token, and only `/health` and `/pair` stay reachable without
-    /// one. Pairing is additionally bounded by the per-peer request limiter.
+    /// Agent bearer token, and only `/health`, `/pair`, `/pair/request` and
+    /// `/pair/status` stay reachable without one. Pairing is additionally bounded
+    /// by the per-peer request limiter.
     pub fn router_with_pairing(&self) -> Router {
         const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
         let state = self.state.clone();
         Router::new()
             .route("/health", get(handle_health))
             .route("/pair", post(handle_pair))
+            .route("/pair/request", post(handle_pair_request))
             .route("/pair/status", post(handle_pair_status))
             .route("/", post(handle_jsonrpc))
             .route("/mcp", post(handle_jsonrpc))

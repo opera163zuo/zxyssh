@@ -14,6 +14,9 @@ pub enum PairingError {
     /// A record may only be deleted once its credential is revoked, so removing
     /// an entry can never silently drop a credential an Agent is still using.
     StillActive,
+    /// One peer, or the operator's waiting list as a whole, has reached the
+    /// number of unconsented requests it may hold.
+    TooManyRequests,
     /// The registry could not be written. The in-memory change is rolled back.
     Storage(String),
     /// The persisted registry could not be read or decrypted. Callers must
@@ -29,6 +32,13 @@ pub const PAIR_REQUEST_TTL_SECONDS: i64 = 900;
 /// Terminal or expired requests older than this are dropped from the registry so
 /// it cannot grow without bound.
 const PAIR_REQUEST_RETENTION_SECONDS: i64 = 24 * 3600;
+/// How many codeless requests one address may leave waiting. Without a cap a
+/// hostile peer on the segment could bury the operator's approve button.
+const MAX_CONSENT_REQUESTS_PER_PEER: usize = 3;
+/// How many codeless requests may wait across all peers.
+const MAX_CONSENT_REQUESTS_TOTAL: usize = 20;
+/// How long a refused request stays pollable before it is dropped.
+const PAIR_REQUEST_REFUSED_WINDOW_SECONDS: i64 = 120;
 const TOKEN_PREFIX: &str = "vsh_";
 const REGISTRY_SETTING: &str = "mcp_lan_agents_v1";
 
@@ -56,8 +66,14 @@ pub enum PairRequestStatus {
     #[default]
     #[serde(rename = "awaiting_approval")]
     AwaitingDelivery,
+    /// No code was offered. Nothing exists yet for this Agent: an operator has
+    /// to approve the request before a credential is created at all.
+    AwaitingConsent,
     /// Sealed. The credential is waiting to be handed back exactly once.
     Approved,
+    /// An operator refused the request. Kept briefly so the polling Agent learns
+    /// it was refused rather than watching its request disappear.
+    Refused,
     /// The credential was delivered to the Agent that requested it.
     Delivered,
     /// The Agent never polled before the request aged out.
@@ -138,6 +154,19 @@ pub struct AgentSummary {
     pub id: String,
     pub name: String,
     pub revoked: bool,
+}
+
+/// One codeless pairing request on the operator's waiting list. The client key
+/// is deliberately absent: the operator decides from the name and the source
+/// address, and the summary is also what the desktop renders.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairRequestSummary {
+    pub id: String,
+    pub agent_name: String,
+    pub peer: String,
+    pub created_at: i64,
+    pub expires_at: i64,
 }
 
 /// A pairing request as the desktop UI and the CLI show it. Never carries
@@ -367,6 +396,117 @@ impl PairingRegistry {
         Ok(PairStarted::Awaiting { request_id })
     }
 
+    /// Begin a pairing that offers no code. Nothing is issued here: the request
+    /// waits on the operator's approve button, which is how an Agent that must
+    /// not carry a code through its own chat log still gets onboarded. The key
+    /// is mandatory, because the credential has to come back sealed.
+    pub fn begin_request(
+        &mut self,
+        name: &str,
+        client_public_key: &str,
+        peer: &str,
+        now: i64,
+    ) -> Result<String, PairingError> {
+        let name = valid_name(name)?;
+        if !valid_client_key(client_public_key) {
+            return Err(PairingError::InvalidClientKey);
+        }
+        self.prune_requests(now);
+        let waiting: Vec<_> = self
+            .state
+            .requests
+            .values()
+            .filter(|request| request.status == PairRequestStatus::AwaitingConsent)
+            .collect();
+        if waiting.len() >= MAX_CONSENT_REQUESTS_TOTAL
+            || waiting
+                .iter()
+                .filter(|request| request.peer == peer)
+                .count()
+                >= MAX_CONSENT_REQUESTS_PER_PEER
+        {
+            return Err(PairingError::TooManyRequests);
+        }
+        let previous = self.state.clone();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.state.requests.insert(
+            request_id.clone(),
+            StoredPairRequest {
+                id: request_id.clone(),
+                agent_name: name,
+                peer: peer.to_string(),
+                created_at: now,
+                expires_at: now + PAIR_REQUEST_TTL_SECONDS,
+                status: PairRequestStatus::AwaitingConsent,
+                client_public_key: Some(client_public_key.to_string()),
+                pairing_code: String::new(),
+                agent_id: None,
+                server_public_key: None,
+                sealed_credential: None,
+            },
+        );
+        if let Err(error) = self.persist() {
+            self.state = previous;
+            return Err(error);
+        }
+        Ok(request_id)
+    }
+
+    /// Approve a codeless request. The credential is created here and only here,
+    /// so a refused or ignored request never leaves a live token behind.
+    pub fn approve_request(
+        &mut self,
+        id: &str,
+        now: i64,
+    ) -> Result<Option<AgentSummary>, PairingError> {
+        if !matches!(
+            self.state.requests.get(id).map(|request| request.status),
+            Some(PairRequestStatus::AwaitingConsent)
+        ) {
+            return Ok(None);
+        }
+        self.finalize_request(id, now)
+    }
+
+    /// Refuse a codeless request. The record survives briefly so the Agent
+    /// polling it learns it was refused instead of watching it vanish.
+    pub fn reject_request(&mut self, id: &str, now: i64) -> Result<bool, PairingError> {
+        if !matches!(
+            self.state.requests.get(id).map(|request| request.status),
+            Some(PairRequestStatus::AwaitingConsent)
+        ) {
+            return Ok(false);
+        }
+        let expires_at = now + PAIR_REQUEST_REFUSED_WINDOW_SECONDS;
+        let id = id.to_string();
+        self.apply(move |state| {
+            if let Some(entry) = state.requests.get_mut(&id) {
+                entry.status = PairRequestStatus::Refused;
+                entry.expires_at = expires_at;
+            }
+        })
+        .map(|()| true)
+    }
+
+    /// Codeless requests waiting on the operator, oldest first.
+    pub fn pending_requests(&self) -> Vec<PairRequestSummary> {
+        let mut waiting: Vec<PairRequestSummary> = self
+            .state
+            .requests
+            .values()
+            .filter(|request| request.status == PairRequestStatus::AwaitingConsent)
+            .map(|request| PairRequestSummary {
+                id: request.id.clone(),
+                agent_name: request.agent_name.clone(),
+                peer: request.peer.clone(),
+                created_at: request.created_at,
+                expires_at: request.expires_at,
+            })
+            .collect();
+        waiting.sort_by_key(|request| request.created_at);
+        waiting
+    }
+
     /// Seal and release the credential for a request. The Agent record and the
     /// request transition are written together, so a failed write cannot leave a
     /// live credential with no owner or a finished request with none.
@@ -378,7 +518,9 @@ impl PairingRegistry {
         let Some(request) = self.state.requests.get(id) else {
             return Ok(None);
         };
-        if request.status != PairRequestStatus::AwaitingDelivery {
+        if request.status != PairRequestStatus::AwaitingDelivery
+            && request.status != PairRequestStatus::AwaitingConsent
+        {
             let summary = request.agent_id.as_ref().and_then(|agent_id| {
                 self.state.agents.get(agent_id).map(|agent| AgentSummary {
                     id: agent.id.clone(),
@@ -441,7 +583,11 @@ impl PairingRegistry {
         let Some(request) = self.state.requests.get(id) else {
             return Ok(None);
         };
-        if request.status == PairRequestStatus::AwaitingDelivery && now >= request.expires_at {
+        if matches!(
+            request.status,
+            PairRequestStatus::AwaitingDelivery | PairRequestStatus::AwaitingConsent
+        ) && now >= request.expires_at
+        {
             self.expire_request(id)?;
             return Ok(Some(PairPoll {
                 status: PairRequestStatus::Expired,
@@ -759,6 +905,105 @@ mod tests {
         assert!(registry.forget(&issued.id).unwrap());
         assert!(registry.list().is_empty());
         assert!(!registry.forget(&issued.id).unwrap());
+    }
+
+    #[test]
+    fn a_codeless_request_issues_nothing_until_an_operator_approves_it() {
+        let mut registry = PairingRegistry::new();
+        let id = registry
+            .begin_request("hermes", &client_key(), "192.168.0.7:51000", NOW)
+            .unwrap();
+        assert!(registry.list().is_empty());
+        assert_eq!(registry.active_agent_count(), 0);
+        assert_eq!(
+            registry.poll_request(&id, NOW).unwrap().unwrap().status,
+            PairRequestStatus::AwaitingConsent
+        );
+        let waiting = registry.pending_requests();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].agent_name, "hermes");
+        assert_eq!(waiting[0].peer, "192.168.0.7:51000");
+
+        let approved = registry.approve_request(&id, NOW).unwrap().unwrap();
+        assert_eq!(approved.name, "hermes");
+        assert!(registry.pending_requests().is_empty());
+        let poll = registry.poll_request(&id, NOW).unwrap().unwrap();
+        assert_eq!(poll.status, PairRequestStatus::Delivered);
+        assert!(poll.sealed_credential.is_some());
+        assert_eq!(registry.active_agent_count(), 1);
+        // The credential can only be taken once.
+        assert_eq!(
+            registry.poll_request(&id, NOW).unwrap().unwrap().status,
+            PairRequestStatus::Delivered
+        );
+        assert!(registry
+            .poll_request(&id, NOW)
+            .unwrap()
+            .unwrap()
+            .sealed_credential
+            .is_none());
+    }
+
+    #[test]
+    fn a_refused_request_never_becomes_a_credential() {
+        let mut registry = PairingRegistry::new();
+        let id = registry
+            .begin_request("stranger", &client_key(), "192.168.0.8:1", NOW)
+            .unwrap();
+        assert!(registry.reject_request(&id, NOW).unwrap());
+        assert_eq!(
+            registry.poll_request(&id, NOW).unwrap().unwrap().status,
+            PairRequestStatus::Refused
+        );
+        assert!(registry.list().is_empty());
+        assert_eq!(registry.active_agent_count(), 0);
+        // A refused request cannot be approved after the fact, and refusing it
+        // twice is not a success the operator could mistake for a decision.
+        assert!(registry.approve_request(&id, NOW).unwrap().is_none());
+        assert!(!registry.reject_request(&id, NOW).unwrap());
+    }
+
+    #[test]
+    fn an_ignored_consent_request_ages_out_without_a_credential() {
+        let mut registry = PairingRegistry::new();
+        let id = registry
+            .begin_request("quiet", &client_key(), "192.168.0.9:1", NOW)
+            .unwrap();
+        let later = NOW + PAIR_REQUEST_TTL_SECONDS + 1;
+        assert!(registry.approve_request(&id, later).unwrap().is_none());
+        assert_eq!(
+            registry.poll_request(&id, later).unwrap().unwrap().status,
+            PairRequestStatus::Expired
+        );
+        assert_eq!(registry.active_agent_count(), 0);
+    }
+
+    #[test]
+    fn one_peer_cannot_flood_the_operators_waiting_list() {
+        let mut registry = PairingRegistry::new();
+        for _ in 0..MAX_CONSENT_REQUESTS_PER_PEER {
+            registry
+                .begin_request("noisy", &client_key(), "192.168.0.10:1", NOW)
+                .unwrap();
+        }
+        assert_eq!(
+            registry.begin_request("noisy", &client_key(), "192.168.0.10:1", NOW),
+            Err(PairingError::TooManyRequests)
+        );
+        // A different peer is not punished for it.
+        assert!(registry
+            .begin_request("other", &client_key(), "192.168.0.11:1", NOW)
+            .is_ok());
+    }
+
+    #[test]
+    fn a_consent_request_requires_a_key_so_delivery_stays_sealed() {
+        let mut registry = PairingRegistry::new();
+        assert_eq!(
+            registry.begin_request("hermes", "not-a-key", "192.168.0.7:1", NOW),
+            Err(PairingError::InvalidClientKey)
+        );
+        assert!(registry.pending_requests().is_empty());
     }
 
     #[test]

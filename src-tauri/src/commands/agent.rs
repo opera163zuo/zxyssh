@@ -128,7 +128,9 @@ pub fn set_agent_guard_config(
 /// the encrypted registry with `zxyssh mcp`, so the desktop and the terminal are
 /// two views of one list.
 use crate::mcp::lan_status::{self, LanListenerStatus};
-use crate::mcp::pairing::{AgentSummary, IssuedAgent, PairingError, PairingRegistry};
+use crate::mcp::pairing::{
+    AgentSummary, IssuedAgent, PairRequestSummary, PairingError, PairingRegistry,
+};
 
 fn registry(db: &State<'_, Arc<Database>>) -> Result<PairingRegistry, String> {
     PairingRegistry::load(db.inner().clone()).map_err(registry_error)
@@ -146,6 +148,9 @@ fn registry_error(error: PairingError) -> String {
             "clientPublicKey must be a base64url-encoded 32-byte X25519 key".to_string()
         }
         PairingError::StillActive => "Revoke this Agent before deleting its record".to_string(),
+        PairingError::TooManyRequests => {
+            "Too many pairing requests are already waiting for the operator".to_string()
+        }
     }
 }
 
@@ -186,6 +191,41 @@ pub fn mcp_pair_code_pending(db: State<'_, Arc<Database>>) -> Result<bool, Strin
     Ok(registry
         .pending_expires_at()
         .is_some_and(|expires_at| expires_at > now))
+}
+
+/// Codeless pairing requests waiting on the operator, oldest first.
+#[tauri::command]
+pub fn mcp_pair_requests_list(
+    db: State<'_, Arc<Database>>,
+) -> Result<Vec<PairRequestSummary>, String> {
+    let registry = registry(&db)?;
+    Ok(registry.pending_requests())
+}
+
+/// Approve a codeless request: this is the moment its credential is created.
+#[tauri::command]
+pub fn mcp_pair_request_approve(
+    db: State<'_, Arc<Database>>,
+    request_id: String,
+) -> Result<Option<AgentSummary>, String> {
+    let mut registry = registry(&db)?;
+    let now = chrono::Utc::now().timestamp();
+    registry
+        .approve_request(&request_id, now)
+        .map_err(registry_error)
+}
+
+/// Refuse a codeless request. Nothing was issued, so there is nothing to revoke.
+#[tauri::command]
+pub fn mcp_pair_request_reject(
+    db: State<'_, Arc<Database>>,
+    request_id: String,
+) -> Result<bool, String> {
+    let mut registry = registry(&db)?;
+    let now = chrono::Utc::now().timestamp();
+    registry
+        .reject_request(&request_id, now)
+        .map_err(registry_error)
 }
 
 #[tauri::command]

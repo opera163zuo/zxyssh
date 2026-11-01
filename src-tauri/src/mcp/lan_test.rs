@@ -455,6 +455,64 @@ async fn a_sealed_credential_is_delivered_exactly_once() {
 }
 
 #[tokio::test]
+async fn a_codeless_request_waits_for_the_operator_then_delivers_sealed() {
+    use crate::mcp::pair_crypto::{self, public_key_b64};
+
+    let service = TestService::start().await;
+    let key_pair = pair_crypto::ephemeral_private_key().expect("client key");
+    let client_public = public_key_b64(&key_pair).expect("client public key");
+    let response = reqwest::Client::new()
+        .post(format!("{}/pair/request", service.base_url))
+        .json(&json!({ "name": "hermes-consent", "clientPublicKey": client_public }))
+        .send()
+        .await
+        .expect("consent request");
+    assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+    let body: Value = response.json().await.expect("body");
+    assert_eq!(body["status"], "awaiting_consent");
+    let request_id = body["requestId"].as_str().expect("requestId").to_string();
+
+    // Nothing has been issued: no Agent exists, and the poll says so without
+    // carrying a credential.
+    assert_eq!(service.registry.lock().unwrap().active_agent_count(), 0);
+    let (status, waiting) = service.poll(&request_id).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(waiting["status"], "awaiting_consent");
+    assert!(waiting.get("sealedToken").is_none());
+
+    // The operator approves, and only now is a credential created.
+    let now = chrono::Utc::now().timestamp();
+    let summary = service
+        .registry
+        .lock()
+        .unwrap()
+        .approve_request(&request_id, now)
+        .expect("approve")
+        .expect("approved request");
+    assert_eq!(summary.name, "hermes-consent");
+
+    let text = service.poll_text(&request_id).await;
+    assert!(
+        !text.contains("vsh_"),
+        "the credential must not appear in the clear"
+    );
+    let delivered: Value = serde_json::from_str(&text).expect("poll body");
+    assert_eq!(delivered["status"], "delivered");
+    let token = pair_crypto::open_sealed(
+        key_pair,
+        delivered["serverPublicKey"]
+            .as_str()
+            .expect("serverPublicKey"),
+        &request_id,
+        delivered["sealedToken"].as_str().expect("sealedToken"),
+    )
+    .expect("open sealed credential");
+    assert!(token.starts_with("vsh_"));
+    assert_eq!(service.registry.lock().unwrap().active_agent_count(), 1);
+    service.shutdown();
+}
+
+#[tokio::test]
 async fn sealed_delivery_returns_the_credential_only_to_the_key_holder() {
     use crate::mcp::pair_crypto::{self, public_key_b64};
 
