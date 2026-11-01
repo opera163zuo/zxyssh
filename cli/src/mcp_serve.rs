@@ -203,9 +203,9 @@ pub enum McpCommand {
     },
     /// Pair this machine with a running listener, reading the code from stdin
     Pair {
-        /// Listener URL, e.g. http://192.168.0.96:8765
-        #[arg(long, default_value = "http://127.0.0.1:8765")]
-        endpoint: String,
+        /// Listener URL; defaults to the address published by the running service
+        #[arg(long)]
+        endpoint: Option<String>,
         /// Name this Agent reports to the service
         #[arg(long)]
         name: String,
@@ -281,7 +281,16 @@ pub fn run(command: McpCommand) -> Result<()> {
             endpoint,
             name,
             wait,
-        } => pair_against_endpoint(&endpoint, &name, wait),
+        } => {
+            let discovered = if endpoint.is_none() {
+                zxyssh_core::mcp::lan_status::read_status()
+                    .map(|status| format!("http://{}", status.bind))
+            } else {
+                None
+            };
+            let endpoint = resolve_pair_endpoint(endpoint, discovered);
+            pair_against_endpoint(&endpoint, &name, wait)
+        }
         McpCommand::Rotate { agent } => match rotate(&agent)? {
             Some(issued) => {
                 println!("Agent {} was issued a new credential:", issued.name);
@@ -446,6 +455,12 @@ pub fn rotate(reference: &str) -> Result<Option<IssuedAgent>> {
         .map_err(|error| anyhow::anyhow!("Could not persist the new credential: {error:?}"))
 }
 
+fn resolve_pair_endpoint(endpoint: Option<String>, discovered: Option<String>) -> String {
+    endpoint
+        .or(discovered)
+        .unwrap_or_else(|| format!("http://{DEFAULT_BIND}"))
+}
+
 /// Become an Agent of a running listener. The pairing code is read from stdin so
 /// it stays out of arguments, shell history and logs.
 fn pair_against_endpoint(endpoint: &str, name: &str, wait: u64) -> Result<()> {
@@ -479,6 +494,30 @@ fn pair_against_endpoint(endpoint: &str, name: &str, wait: u64) -> Result<()> {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn pair_endpoint_prefers_explicit_override() {
+        assert_eq!(
+            resolve_pair_endpoint(
+                Some("http://example.test:9000".to_string()),
+                Some("http://192.168.0.96:8765".to_string()),
+            ),
+            "http://example.test:9000"
+        );
+    }
+
+    #[test]
+    fn pair_endpoint_discovers_the_live_listener() {
+        assert_eq!(
+            resolve_pair_endpoint(None, Some("http://192.168.0.96:8765".to_string())),
+            "http://192.168.0.96:8765"
+        );
+    }
+
+    #[test]
+    fn pair_endpoint_falls_back_to_loopback_without_a_listener_status() {
+        assert_eq!(resolve_pair_endpoint(None, None), "http://127.0.0.1:8765");
+    }
 
     #[test]
     fn loopback_always_opens_without_pairing() {

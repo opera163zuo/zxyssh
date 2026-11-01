@@ -104,12 +104,12 @@ pair_http() { # pair_http <base> <name> <code> [public-key] -> HTTP status
     -H 'Content-Type: application/json' -d "$body"
 }
 
-# Pair the shipped way: the reference client spends the code, then fetches the
-# credential sealed to its own ephemeral key from /pair/status. Returns the token.
-pair() { # pair <base> <name> <code> <state-dir> -> token
-  local base=$1 name=$2 code=$3 state=$4
+# Pair the shipped way: the reference client spends the code, then discovers
+# the listener address from the status file and fetches its sealed credential.
+pair() { # pair <name> <code> <state-dir> -> token
+  local name=$1 code=$2 state=$3
   printf '%s\n' "$code" | XDG_DATA_HOME="$state" HOME="$state" "$BIN" mcp pair \
-    --endpoint "http://$base" --name "$name" > "$state/pair-client.log" 2>&1 \
+    --name "$name" > "$state/pair-client.log" 2>&1 \
     || fail "pairing client failed: $(cat "$state/pair-client.log")"
   sed -n 's/.*sealed: \(vsh_[A-Za-z0-9_-]*\).*/\1/p' "$state/pair-client.log"
 }
@@ -138,7 +138,7 @@ expect "the same code cannot be spent twice" \
   "$(pair_http "127.0.0.1:$PORT" "replay" "$CODE" "$(client_key)")" "401"
 
 CODE=$(mint "$LB")
-TOKEN=$(pair "127.0.0.1:$PORT" "smoke-loopback" "$CODE" "$LB")
+TOKEN=$(pair "smoke-loopback" "$CODE" "$LB")
 [ "${#TOKEN}" = "47" ] || fail "pairing returned no token: ${TOKEN:0:6}…"
 ok "a sealed pairing returned a 47-character Agent token"
 
@@ -191,7 +191,7 @@ else
   ok "listener opened on $LAN_IP:$PORT because an Agent was already paired"
   LEP=$LAN_IP:$PORT
   LCODE=$(mint "$LAN")
-  LTOKEN=$(pair "$LEP" "smoke-lan" "$LCODE" "$LAN")
+  LTOKEN=$(pair "smoke-lan" "$LCODE" "$LAN")
   [ "${#LTOKEN}" = "47" ] || fail "LAN pairing returned no token"
   ok "an Agent paired over $LAN_IP"
   expect "tools/list over the LAN address" \

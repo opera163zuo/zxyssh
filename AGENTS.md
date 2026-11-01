@@ -87,7 +87,7 @@ src-tauri/                    # Rust backend
   │   ├── local_shell/        # Local terminal (portable-pty)
   │   ├── ipc/                # Service↔GUI IPC socket (per-user 0700)
   │   ├── mcp/                # MCP service: HTTP JSON-RPC, pairing, sealed credential delivery, Agent tool surface
-  │   ├── install/            # AI tool skill installer
+  │   ├── install/            # startup-only Skill installer (no Settings surface)
   │   ├── platform/           # Platform/window integration and app-data locations
   │   ├── plugins/            # Plugin runtime (no marketplace UI or Agent tools)
   │   └── lib.rs              # App entry, command registration
@@ -133,14 +133,14 @@ Stores in `src/stores/`:
 | `runtimeCapabilitiesStore` | Runtime capability flags (platform, local shell, agent gateway, updater) |
 | `serverStore` | Server/group CRUD |
 | `sessionStore` | SSH session lifecycle |
-| `settingsStore` | App settings + themes + AI tool config |
+| `settingsStore` | App settings + themes |
 | `updateStore` | App update check/download state |
 
 ## Tauri Commands
 
-Organized by module under `src-tauri/src/commands/`: `session`, `server`, `sftp`, `fingerprint`, `local_shell`, `install`, `dialog`, `settings`, `plugin`, `local_files`, `workspace_window`, `agent`, `app`, `platform`.
+Organized by module under `src-tauri/src/commands/`: `session`, `server`, `sftp`, `fingerprint`, `local_shell`, `dialog`, `settings`, `plugin`, `local_files`, `workspace_window`, `agent`, `app`, `platform`.
 
-All registered in `src-tauri/src/lib.rs` → `invoke_handler`. The `snippet`, `history`, `tunnel`, `dbconn`, `coding_agent`, `logging` (session recording) and `cloud_sync` command modules were removed with their UI; do not re-register them to fix a missing frontend call.
+All registered in `src-tauri/src/lib.rs` → `invoke_handler`. The `snippet`, `history`, `tunnel`, `dbconn`, `coding_agent`, `logging` (session recording), `cloud_sync` and `install` (the Settings → Skills surface) command modules were removed with their UI; do not re-register them to fix a missing frontend call.
 
 ## Build & Run
 

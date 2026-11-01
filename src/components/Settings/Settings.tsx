@@ -14,13 +14,11 @@ import {
 import { useFingerprintStore } from '../../stores/fingerprintStore';
 import { useUpdateStore } from '../../stores/updateStore';
 import { useRuntimeCapabilitiesStore } from '../../stores/runtimeCapabilitiesStore';
-import { IntegrationCard } from './IntegrationCard';
 import { CustomThemeEditor } from './CustomThemeEditor';
 import { AgentPairingPanel } from '../AgentPairingPanel';
 import {
   Palette,
   Terminal,
-  Plug,
   Info,
   RotateCcw,
   ExternalLink,
@@ -406,22 +404,15 @@ function AgentGuardSection() {
 export function Settings() {
   const { t, i18n } = useTranslation();
   const {
-    aiTools,
     gatewayStatus,
     appVersion,
     appVersionLoaded,
     settings,
     uploadIgnoreConfig,
-    loading,
-    loadingToolId,
-    error,
     initialized,
-    fetchAiTools,
     fetchGatewayStatus,
     fetchAppVersion,
     initializeSettings,
-    installTo,
-    uninstallFrom,
     updateTerminalSettings,
     updateAppearanceSettings,
     updateUploadIgnoreConfig,
@@ -453,24 +444,13 @@ export function Settings() {
     void initializeSettings();
     void fetchAppVersion();
     void loadRuntimeCapabilities().then((capabilities) => {
-      if (capabilities.agentGateway) {
-        void fetchAiTools();
-        void fetchGatewayStatus();
-      }
+      if (capabilities.agentGateway) void fetchGatewayStatus();
     });
-  }, [initializeSettings, fetchAiTools, fetchGatewayStatus, fetchAppVersion, loadRuntimeCapabilities]);
+  }, [initializeSettings, fetchGatewayStatus, fetchAppVersion, loadRuntimeCapabilities]);
 
   useEffect(() => {
     setUploadExcludeText(uploadIgnoreConfig.excludedPaths.join('\n'));
   }, [uploadIgnoreConfig.excludedPaths]);
-
-  const handleInstall = (toolId: string) => {
-    installTo(toolId);
-  };
-
-  const handleUninstall = (toolId: string) => {
-    uninstallFrom(toolId);
-  };
 
   const handleResetSettings = () => {
     resetSettings();
@@ -763,69 +743,6 @@ export function Settings() {
             </div>
           </dl>
         </div>
-        </SettingsSection>
-
-      {/* ================================================================== */}
-      {/* Skills Section */}
-      {/* ================================================================== */}
-      <SettingsSection
-        icon={<Plug className="w-5 h-5" />}
-        title={t('settings.skills')}
-        description={t('settings.skillsDesc')}
-      >
-        {/* Error Display */}
-        {error && (
-          <div className="mb-4 p-4 rounded-lg bg-tokyo-red/10 border border-tokyo-red/30 text-tokyo-red">
-            <p className="font-medium">{t('common.error')}</p>
-            <p className="text-sm opacity-80">{error}</p>
-          </div>
-        )}
-
-        {/* Loading State */}
-        {loading && aiTools.length === 0 && (
-          <div className="text-center py-8">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-tokyo-blue"></div>
-            <p className="mt-2 text-tokyo-comment">{t('settings.detectingTools')}</p>
-          </div>
-        )}
-
-        {/* Integration Cards Grid */}
-        {aiTools.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {aiTools.map((tool) => (
-              <IntegrationCard
-                key={tool.id}
-                tool={tool}
-                onInstall={handleInstall}
-                onUninstall={handleUninstall}
-                loading={loadingToolId === tool.id}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Empty State */}
-        {!loading && aiTools.length === 0 && !error && (
-          <div className="text-center py-8 text-tokyo-comment">
-            <p>{t('settings.noToolsDetected')}</p>
-            <p className="text-sm mt-2">{t('settings.supportedTools')}</p>
-          </div>
-        )}
-
-        {/* Refresh Button */}
-        {aiTools.length > 0 && (
-          <div className="mt-4 flex justify-end">
-            <button
-              onClick={() => fetchAiTools()}
-              disabled={loading}
-              className="px-4 py-2 text-sm rounded-lg border border-tokyo-bg-hl text-tokyo-fg
-                         hover:bg-tokyo-bg-hl hover:text-tokyo-fg transition-colors
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? t('settings.refreshing') : t('settings.refreshStatus')}
-            </button>
-          </div>
-        )}
         </SettingsSection>
         </>
       )}

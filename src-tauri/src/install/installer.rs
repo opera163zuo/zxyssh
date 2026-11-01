@@ -4,13 +4,11 @@ use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
-use super::detector::{
-    find_tool, skill_dir_candidates_for_tool, skill_install_dirs_for_tool, AiTool,
-};
+use super::detector::{skill_install_dirs_for_tool, AiTool};
 
 const SKILL_DIR_NAME: &str = "zxyssh";
-// Only the uninstall path still looks for these: a machine that installed the
-// pre-rebrand Skill must be able to remove those directories.
+// Writing the current Skill also clears these: a machine that ran the
+// pre-rebrand build must not keep a stale copy beside it.
 const PREVIOUS_SKILL_DIR_NAMES: [&str; 2] = ["vibeshell", "vshell"];
 const NATIVE_SKILL_MD_TEMPLATE: &str = include_str!("../../../skills/zxyssh/SKILL.md");
 
@@ -97,26 +95,6 @@ fn install_skill_file_to_dirs(skills_dirs: Vec<PathBuf>) -> Result<Vec<PathBuf>>
     Ok(installed_paths)
 }
 
-fn uninstall_skill_file(tool_id: &str) -> Result<()> {
-    if let Some(skills_dirs) = skill_dir_candidates_for_tool(tool_id) {
-        for skills_dir in skills_dirs {
-            for dir_name in [SKILL_DIR_NAME]
-                .iter()
-                .chain(PREVIOUS_SKILL_DIR_NAMES.iter())
-            {
-                let skill_dir = skills_dir.join(dir_name);
-                if skill_dir.exists() {
-                    fs::remove_dir_all(&skill_dir).with_context(|| {
-                        format!("Failed to remove skill directory {:?}", skill_dir)
-                    })?;
-                    log::info!("[Install] zxySSH skill removed from {:?}", skill_dir);
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 #[derive(Debug)]
 pub struct InstallResult {
     pub tool: AiTool,
@@ -128,47 +106,6 @@ pub struct InstallResult {
 pub fn install_to_tool(tool_id: &str, _config_path: &PathBuf) -> Result<Option<PathBuf>> {
     let skill_paths = install_skill_file(tool_id)?;
     Ok(skill_paths.into_iter().next())
-}
-
-pub fn uninstall_from_tool(tool_id: &str, _config_path: &PathBuf) -> Result<Option<PathBuf>> {
-    uninstall_skill_file(tool_id)?;
-    Ok(None)
-}
-
-pub fn install_by_id(tool_id: &str) -> Result<InstallResult> {
-    let tool = find_tool(tool_id).ok_or_else(|| anyhow!("Unknown tool: {}", tool_id))?;
-    match install_to_tool(&tool.id, &tool.config_path) {
-        Ok(path) => Ok(InstallResult {
-            tool,
-            success: true,
-            backup_path: path,
-            error: None,
-        }),
-        Err(error) => Ok(InstallResult {
-            tool,
-            success: false,
-            backup_path: None,
-            error: Some(error.to_string()),
-        }),
-    }
-}
-
-pub fn uninstall_by_id(tool_id: &str) -> Result<InstallResult> {
-    let tool = find_tool(tool_id).ok_or_else(|| anyhow!("Unknown tool: {}", tool_id))?;
-    match uninstall_from_tool(&tool.id, &tool.config_path) {
-        Ok(_) => Ok(InstallResult {
-            tool,
-            success: true,
-            backup_path: None,
-            error: None,
-        }),
-        Err(error) => Ok(InstallResult {
-            tool,
-            success: false,
-            backup_path: None,
-            error: Some(error.to_string()),
-        }),
-    }
 }
 
 pub fn install_to_all() -> Vec<InstallResult> {
@@ -193,30 +130,6 @@ pub fn install_to_all() -> Vec<InstallResult> {
         .collect()
 }
 
-pub fn uninstall_from_all() -> Vec<InstallResult> {
-    use super::detector::get_configured_tools;
-
-    get_configured_tools()
-        .into_iter()
-        .map(
-            |tool| match uninstall_from_tool(&tool.id, &tool.config_path) {
-                Ok(_) => InstallResult {
-                    tool,
-                    success: true,
-                    backup_path: None,
-                    error: None,
-                },
-                Err(error) => InstallResult {
-                    tool,
-                    success: false,
-                    backup_path: None,
-                    error: Some(error.to_string()),
-                },
-            },
-        )
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +142,8 @@ mod tests {
             "name: zxyssh",
             "MCP endpoint",
             "zxyssh mcp pair-code",
+            "zxyssh mcp pair --name <name>",
+            "mcp-lan-status.json",
             "zxyssh mcp agents",
             "zxyssh mcp hostkey probe",
             "server_list",

@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.3.0 — 2026-11-01
+
+### Pairing follows the listener address
+
+`zxyssh mcp pair` no longer assumes its service is on loopback. When the
+operator omits `--endpoint`, it uses the live listener address already
+published in zxySSH's local service status file; an explicit
+`--endpoint` still takes precedence, and loopback remains the fallback when no
+service has published a live status. This lets a local Agent pair with a
+listener bound to a specific LAN interface without copying its IP by hand.
+
+### The pairing panel says what it means now
+
+The countdown and the Agent count rendered as `%{seconds}` and `%{agents}`: those
+two strings were the only ones in the catalog written in Rust's interpolation
+syntax, while i18next is configured with its default `{{ }}`, so nothing was ever
+substituted. They interpolate now, and the third `%{}` string left behind by the
+deleted approval queue is gone with it.
+
+A code you have shown somebody is a code you may need to replace, so the digits
+are now the button: click them and the panel mints a fresh code, which
+invalidates the one on screen. And a pairing that succeeds is now visible the
+second it succeeds. The panel used to poll the Agent list on a five-second timer
+that could never fire — its effect re-ran every second because it listed the
+ticking clock among its dependencies — so a spent code just sat there counting
+down to nothing. It now asks the registry directly, through a new
+`mcp_pair_code_pending`, every two seconds, and the first answer of "no" clears
+the code, reloads the list and names the Agent that arrived.
+
+### Settings stopped offering to install what it already installs
+
+The **Skills** section — the per-tool cards for installing the zxySSH Skill into
+Claude Code, Codex and friends — is deleted, along with its three Tauri commands
+(`detect_ai_tools`, `install_to_tool`, `uninstall_from_tool`), `IntegrationCard`,
+the store fields behind it and the installer functions only it called. The desktop already writes the Skill into its default tool set at startup, which
+is what makes the Skill reachable to an Agent in the first place; the section
+only ever re-ran that by hand.
+
 ## 2.2.0 — 2026-11-01
 
 ### Pairing is the code, nothing else
