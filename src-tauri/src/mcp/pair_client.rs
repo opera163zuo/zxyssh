@@ -191,6 +191,11 @@ async fn await_delivery(
                     token,
                 });
             }
+            Some("approved") => {
+                return Err(anyhow!(
+                    "the operator approved this HTTP-only request; ask them to save the one-time credential in the Agent's managed secret store"
+                ))
+            }
             Some("refused") | Some("rejected") => {
                 return Err(anyhow!("an operator refused this pairing request"))
             }

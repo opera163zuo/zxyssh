@@ -14,11 +14,16 @@ onboard such an Agent.
 waits. The desktop puts it directly in the **Agent list**, above the paired
 records, with an **等待同意** badge, the source address and its expiry countdown;
 the same row has approve and reject buttons. Headless, `zxyssh mcp requests list`
-and `requests approve <id>` do the same job. The credential comes into existence at
-the moment of approval and arrives sealed to a key generated on the Agent's
-side, so this door never carries a credential in the clear — which is why the key
-is required rather than optional. A request nobody answers expires after 900
-seconds having issued nothing, and refusing one leaves nothing to revoke.
+and `requests approve <id>` do the same job. Because this CLI makes an ephemeral
+key, approval seals the credential to it and its poll takes the result once.
+
+A URL-only Agent can send `POST /pair/request {"name"}` without a key. Approval
+still creates the credential only at the button press, but the token is returned
+only to the local desktop/CLI for the operator to put in the Agent's managed
+secret store; `/pair/status` says `approved` and never carries that token. This
+lets an Agent that cannot receive secrets in chat request access by URL alone.
+A request nobody answers expires after 900 seconds having issued nothing, and
+refusing one leaves nothing to revoke.
 
 The code door is unchanged and still the default way in: a correct six-digit
 code pairs immediately, with no approval step, because an unattended host cannot

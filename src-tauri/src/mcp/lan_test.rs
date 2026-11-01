@@ -489,7 +489,8 @@ async fn a_codeless_request_waits_for_the_operator_then_delivers_sealed() {
         .approve_request(&request_id, now)
         .expect("approve")
         .expect("approved request");
-    assert_eq!(summary.name, "hermes-consent");
+    assert_eq!(summary.agent.name, "hermes-consent");
+    assert!(summary.token.is_none());
 
     let text = service.poll_text(&request_id).await;
     assert!(
@@ -509,6 +510,51 @@ async fn a_codeless_request_waits_for_the_operator_then_delivers_sealed() {
     .expect("open sealed credential");
     assert!(token.starts_with("vsh_"));
     assert_eq!(service.registry.lock().unwrap().active_agent_count(), 1);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn http_only_consent_shows_token_to_operator_but_never_to_poller() {
+    let service = TestService::start().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/pair/request", service.base_url))
+        .json(&json!({ "name": "hermes-http-only" }))
+        .send()
+        .await
+        .expect("HTTP-only consent request");
+    assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+    let body: Value = response.json().await.expect("request body");
+    assert_eq!(body["status"], "awaiting_consent");
+    let request_id = body["requestId"].as_str().expect("requestId").to_string();
+
+    let (_, waiting) = service.poll(&request_id).await;
+    assert_eq!(waiting["status"], "awaiting_consent");
+    assert!(waiting.get("token").is_none());
+
+    let approval = service
+        .registry
+        .lock()
+        .unwrap()
+        .approve_request(&request_id, chrono::Utc::now().timestamp())
+        .expect("approve")
+        .expect("approved request");
+    let token = approval
+        .token
+        .expect("local operator receives one-time token");
+    assert!(service
+        .registry
+        .lock()
+        .unwrap()
+        .authenticate(&token)
+        .is_some());
+
+    let (status, approved) = service.poll(&request_id).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(approved["status"], "approved");
+    assert_eq!(approved["agentId"], approval.agent.id);
+    assert!(approved.get("token").is_none());
+    assert!(approved.get("sealedToken").is_none());
+    assert!(!serde_json::to_string(&approved).unwrap().contains(&token));
     service.shutdown();
 }
 

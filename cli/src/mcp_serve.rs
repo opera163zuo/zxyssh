@@ -484,11 +484,18 @@ fn requests(command: RequestsCommand) -> Result<()> {
                 .approve_request(&id, now)
                 .map_err(|error| anyhow::anyhow!("Could not approve the request: {error:?}"))?
             {
-                Some(agent) => {
+                Some(approval) => {
                     println!(
-                        "Approved {} (agent id {}). It can now fetch its credential.",
-                        agent.name, agent.id
+                        "Approved {} (agent id {}).",
+                        approval.agent.name, approval.agent.id
                     );
+                    if let Some(token) = approval.token {
+                        println!("Credential for the operator to place in the Agent's managed secret store:");
+                        println!("{token}");
+                        println!("Shown once. Do not paste it into chat or logs.");
+                    } else {
+                        println!("Credential was sealed to the Agent's key; it can fetch it now.");
+                    }
                     Ok(())
                 }
                 None => bail!("That request is no longer waiting for a decision"),

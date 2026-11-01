@@ -167,6 +167,7 @@ export function AgentPairingPanel() {
         <div className="flex flex-wrap items-center gap-3 border-b border-tokyo-bg-hl bg-tokyo-bg/60 px-4 py-3">
           <span className="text-xs text-tokyo-yellow">{t('settings.pairingTokenOnce')}</span>
           <code className="break-all font-mono text-xs text-tokyo-fg">{issuedToken}</code>
+          <span className="text-xs text-tokyo-comment">{t('settings.pairingTokenSafeStorage')}</span>
           <button type="button" className="icon-button" onClick={dismissIssuedToken}>
             {t('settings.pairingTokenDone')}
           </button>
@@ -198,6 +199,11 @@ export function AgentPairingPanel() {
                     {t('settings.pairingRequestExpiresIn', {
                       seconds: remainingSeconds(request.expiresAt, now),
                     })}
+                  </div>
+                  <div className="mt-1 text-xs text-tokyo-comment">
+                    {request.clientHasKey
+                      ? t('settings.pairingRequestSealed')
+                      : t('settings.pairingRequestManualHandoff')}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">

@@ -26,13 +26,27 @@ POST /pair {"name":"<agent name>","code":"<six digits>"}
      -> 200 {"token":"..."}
 ```
 
-**Never ask the operator to type a pairing code into the chat, and never accept one that way.** The code is a credential, and a chat transcript is a log like any other. When you do not hold a code, open the pairing yourself and let a human approve it:
+**Never ask the operator to type a pairing code or a bearer token into the chat, and never accept one that way.** Both are credentials; a transcript is a log like any other.
+
+If this local Agent can run the native CLI in a private tool environment, it can open a codeless request and wait for approval:
 
 ```bash
 zxyssh mcp pair --name <agent name> --no-code
 ```
 
-That posts `POST /pair/request {"name","clientPublicKey"}` and polls `/pair/status` until an operator approves it — in the desktop under Settings → **Agent access and pairing**, or headless with `zxyssh mcp requests list` then `requests approve <id>`. The credential then arrives sealed to a key you generated in the CLI, never in the clear. A request nobody approves expires after 900 seconds having issued nothing at all, so leaving it unanswered is safe.
+The CLI generates an ephemeral key, posts `POST /pair/request {"name","clientPublicKey"}`, and waits for an operator to approve it — in the desktop under Settings → **Agent access and pairing**, or headless with `zxyssh mcp requests list` then `requests approve <id>`. The credential is sealed to the CLI's key. Use this only when command output is not exposed in a shared chat transcript; the CLI prints the credential once so it can be placed into the local Agent configuration.
+
+If you can only reach the HTTP endpoint, request consent without a key:
+
+```text
+POST /pair/request {"name":"Hermes"}
+     -> 202 {"requestId":"...","status":"awaiting_consent","pollPath":"/pair/status"}
+POST /pair/status {"requestId":"..."}
+     -> 200 {"status":"awaiting_consent"}  (keep polling)
+     -> 200 {"status":"approved","agentId":"...","name":"Hermes"}  (stop; no token is returned)
+```
+
+When the status becomes `approved`, stop polling and tell the operator to put the one-time token shown locally in zxySSH into the Agent's managed secret store. The server deliberately does not return it from `/pair/status`; never ask for the token in chat. The headless `zxyssh mcp requests approve <id>` command also prints the token once, so it must only be run by the operator in a private local terminal, not through the Agent's chat/tool transcript. Until the credential is available through the managed store, do not attempt authenticated MCP requests. An unanswered request expires after 900 seconds having issued nothing; `refused` means stop.
 
 `zxyssh mcp pair --name <name>` is the reference client for the code path: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once. When run on the service host, it discovers the live listener address from zxySSH's local service status file; pass `--endpoint <url>` to pair from another machine or override that address.
 

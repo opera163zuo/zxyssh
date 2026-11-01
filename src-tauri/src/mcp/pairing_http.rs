@@ -51,8 +51,10 @@ pub struct PairPollRequest {
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
     name: String,
-    #[serde(alias = "clientPublicKey")]
-    client_public_key: String,
+    /// Optional for HTTP-only agents. With a key, approval seals delivery to
+    /// that agent; without one, the token is shown only in the local operator UI.
+    #[serde(default, alias = "clientPublicKey")]
+    client_public_key: Option<String>,
 }
 
 /// Reject pairing floods before they reach a code's own attempt counter.
@@ -247,7 +249,7 @@ pub async fn handle_pair_request(State(state): State<McpState>, request: Request
         Err(_) => {
             return reject(
                 StatusCode::BAD_REQUEST,
-                "Expected a JSON body with name and clientPublicKey",
+                "Expected a JSON body with name and optional clientPublicKey",
             )
         }
     };
@@ -262,7 +264,7 @@ pub async fn handle_pair_request(State(state): State<McpState>, request: Request
         return registry_unavailable();
     }
     let now = chrono::Utc::now().timestamp();
-    match registry.begin_request(&body.name, &body.client_public_key, &peer, now) {
+    match registry.begin_request(&body.name, body.client_public_key.as_deref(), &peer, now) {
         Ok(request_id) => no_store(
             (
                 StatusCode::ACCEPTED,
@@ -277,7 +279,7 @@ pub async fn handle_pair_request(State(state): State<McpState>, request: Request
         Err(PairingError::InvalidName) => reject(StatusCode::BAD_REQUEST, "Agent name is required"),
         Err(PairingError::InvalidClientKey) => reject(
             StatusCode::BAD_REQUEST,
-            "clientPublicKey is required and must be a base64url-encoded 32-byte X25519 key",
+            "clientPublicKey must be a base64url-encoded 32-byte X25519 key when provided",
         ),
         Err(PairingError::TooManyRequests) => reject(
             StatusCode::TOO_MANY_REQUESTS,
@@ -334,11 +336,16 @@ pub async fn handle_pair_status(State(state): State<McpState>, request: Request)
         Err(_) => return reject(StatusCode::INTERNAL_SERVER_ERROR, "Pairing failed"),
     };
     let mut body = serde_json::json!({ "status": status_name(poll.status) });
-    if poll.status == PairRequestStatus::Delivered {
+    if matches!(
+        poll.status,
+        PairRequestStatus::OperatorApproved | PairRequestStatus::Delivered
+    ) {
         if let (Some(id), Some(name)) = (poll.agent_id, poll.agent_name) {
             body["agentId"] = serde_json::Value::String(id);
             body["name"] = serde_json::Value::String(name);
         }
+    }
+    if poll.status == PairRequestStatus::Delivered {
         if let (Some(public_key), Some(sealed)) = (poll.server_public_key, poll.sealed_credential) {
             body["serverPublicKey"] = serde_json::Value::String(public_key);
             body["sealedToken"] = serde_json::Value::String(sealed);
@@ -354,6 +361,7 @@ fn status_name(status: PairRequestStatus) -> &'static str {
         // keep parsing it; the state now means "sealing, poll again".
         PairRequestStatus::AwaitingDelivery => "awaiting_approval",
         PairRequestStatus::AwaitingConsent => "awaiting_consent",
+        PairRequestStatus::OperatorApproved => "approved",
         PairRequestStatus::Refused => "refused",
         PairRequestStatus::Approved => "approved",
         PairRequestStatus::Delivered => "delivered",

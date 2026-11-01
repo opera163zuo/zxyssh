@@ -17,6 +17,7 @@ const defaults = {
     peer: string;
     createdAt: number;
     expiresAt: number;
+    clientHasKey: boolean;
   }[],
   lanStatus: null,
   issuedToken: null,
@@ -87,11 +88,13 @@ it('shows a codeless request with its address and offers approve or reject', () 
         peer: '192.168.0.7:51234',
         createdAt: 0,
         expiresAt: Math.floor(Date.now() / 1000) + 300,
+        clientHasKey: false,
       },
     ],
   });
   render(<AgentPairingPanel />);
   expect(screen.getByText('opencode')).toBeInTheDocument();
+  expect(screen.getByText('settings.pairingRequestManualHandoff')).toBeInTheDocument();
   expect(screen.getByText(/192\.168\.0\.7:51234/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRequestApprove' }));
   expect(useMcpPairingStore.getState().approveRequest).toHaveBeenCalledWith('r1');

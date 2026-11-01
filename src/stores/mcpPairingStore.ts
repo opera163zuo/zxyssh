@@ -28,6 +28,13 @@ export interface PairRequest {
   peer: string;
   createdAt: number;
   expiresAt: number;
+  clientHasKey: boolean;
+}
+
+/** A credential returned to the operator when an HTTP-only request is approved. */
+export interface PairApproval {
+  agent: PairedAgent;
+  token: string | null;
 }
 
 interface PairingState {
@@ -161,7 +168,21 @@ export const useMcpPairingStore = create<PairingState>((set, get) => {
 
     /** Approving is what creates the credential; nothing exists before the click. */
     approveRequest: async (requestId) => {
-      await write('mcp_pair_request_approve', { requestId });
+      if (get().busy) return;
+      set({ busy: true });
+      try {
+        const result = await safeInvoke<PairApproval | null>('mcp_pair_request_approve', {
+          requestId,
+        });
+        if (!result.success) {
+          set({ error: result.error.message });
+          return;
+        }
+        set({ issuedToken: result.data?.token ?? null, error: null });
+        await load();
+      } finally {
+        set({ busy: false });
+      }
     },
 
     rejectRequest: async (requestId) => {

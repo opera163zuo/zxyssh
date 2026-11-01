@@ -102,19 +102,30 @@ offers a key) and prints it once:
 ```
 
 An Agent that must not be handed a code — because a chat transcript is a log like
-any other — opens the pairing itself and waits for a human instead:
+any other — can open the pairing itself and wait for a human:
 
 ```bash
 ~/.local/bin/zxyssh mcp pair --name hermes-laptop --no-code
 ```
 
-That posts `POST /pair/request {"name","clientPublicKey"}`, which creates
-**nothing**: the request waits in the desktop under Settings → **Agent access and
-pairing**, or headless in `zxyssh mcp requests list`. `requests approve <id>`
-creates the credential at that moment and the Agent's poll picks it up sealed;
-`requests reject <id>` leaves nothing to revoke. An unapproved request expires
-after 900 seconds having issued nothing. The key is mandatory on this path, so
-unlike the code path it can never deliver a credential in the clear.
+The reference CLI generates an ephemeral key and polls until approved; the
+credential is returned sealed to that CLI. For an HTTP-only Agent, omit the key:
+
+```text
+POST /pair/request {"name":"Hermes"}
+     -> 202 {"requestId":"...","status":"awaiting_consent"}
+POST /pair/status {"requestId":"..."}
+     -> 200 {"status":"approved","agentId":"...","name":"Hermes"}
+```
+
+The desktop shows the request in the Agent list. Approval creates the credential,
+but the unauthenticated poll only reports `approved`, never returns the token.
+The one-time token appears only in the local desktop; enter it into the remote
+Agent's managed secret store, never into chat. Until the operator provisions that
+credential, the Agent cannot make authenticated MCP calls. The headless `zxyssh mcp requests approve <id>` command also prints the token
+once for the operator to put in the managed secret store; run it in a private
+operator terminal, never through the Agent's chat/tool transcript. An unanswered
+request expires after 900 seconds; refusing it issues nothing.
 
 Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/pair`, `/pair/request` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display, and `mcp pair` reads that file when `--endpoint` is omitted.
 

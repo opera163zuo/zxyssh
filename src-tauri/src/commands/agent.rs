@@ -129,7 +129,7 @@ pub fn set_agent_guard_config(
 /// two views of one list.
 use crate::mcp::lan_status::{self, LanListenerStatus};
 use crate::mcp::pairing::{
-    AgentSummary, IssuedAgent, PairRequestSummary, PairingError, PairingRegistry,
+    AgentSummary, IssuedAgent, PairApproval, PairRequestSummary, PairingError, PairingRegistry,
 };
 
 fn registry(db: &State<'_, Arc<Database>>) -> Result<PairingRegistry, String> {
@@ -207,7 +207,7 @@ pub fn mcp_pair_requests_list(
 pub fn mcp_pair_request_approve(
     db: State<'_, Arc<Database>>,
     request_id: String,
-) -> Result<Option<AgentSummary>, String> {
+) -> Result<Option<PairApproval>, String> {
     let mut registry = registry(&db)?;
     let now = chrono::Utc::now().timestamp();
     registry
