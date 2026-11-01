@@ -162,6 +162,28 @@ XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | grep -q smoke-consent \
 CONSENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-consent/{print $1}')
 XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${CONSENT_ID:0:8}" >/dev/null
 
+# A URL-only Agent cannot take a token through the chat. It polls for approval;
+# the local operator gets the one-time token, while HTTP status never does.
+HTTP_ONLY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/request" \
+  -H 'Content-Type: application/json' -d '{"name":"smoke-http-only"}')
+expect "HTTP-only request does not need a client key" \
+  "$(printf '%s' "$HTTP_ONLY" | json status)" "awaiting_consent"
+HTTP_REQ_ID=$(printf '%s' "$HTTP_ONLY" | json requestId)
+HTTP_APPROVAL=$(XDG_DATA_HOME="$LB" "$BIN" mcp requests approve "$HTTP_REQ_ID") \
+  || fail "could not approve HTTP-only request $HTTP_REQ_ID"
+HTTP_TOKEN=$(printf '%s\n' "$HTTP_APPROVAL" | sed -n 's/^\(vsh_[A-Za-z0-9_-]*\)$/\1/p' | head -1)
+[ "${#HTTP_TOKEN}" = "47" ] || fail "operator approval did not show its one-time token"
+HTTP_POLL=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" \
+  -H 'Content-Type: application/json' -d "{\"requestId\":\"$HTTP_REQ_ID\"}")
+expect "HTTP-only poll reports approval" "$(printf '%s' "$HTTP_POLL" | json status)" "approved"
+printf '%s' "$HTTP_POLL" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "token" not in d and "sealedToken" not in d' \
+  && ok "HTTP-only poll never exposes the token" \
+  || fail "HTTP-only poll exposed credential material"
+expect "operator-held HTTP-only token authenticates" \
+  "$(rpc "127.0.0.1:$PORT" "$HTTP_TOKEN" '{"jsonrpc":"2.0","id":7,"method":"tools/list"}' | json result tools 0 name)" "server_list"
+HTTP_AGENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-http-only/{print $1}')
+XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${HTTP_AGENT_ID:0:8}" >/dev/null
+
 EP=127.0.0.1:$PORT
 expect "initialize" "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json result serverInfo name)" "zxyssh"
 expect "notifications/initialized body" \
