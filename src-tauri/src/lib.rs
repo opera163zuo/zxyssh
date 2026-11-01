@@ -59,6 +59,7 @@ use commands::{
     local_shell_send_bytes,
     local_shell_send_input,
     // LAN Agent pairing and access management
+    mcp_agent_forget,
     mcp_agent_rename,
     mcp_agent_revoke,
     mcp_agent_rotate,
@@ -341,6 +342,7 @@ pub fn run() {
             mcp_pair_code_pending,
             mcp_agents_list,
             mcp_agent_revoke,
+            mcp_agent_forget,
             mcp_agent_rename,
             mcp_agent_rotate,
             mcp_lan_status,

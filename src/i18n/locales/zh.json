@@ -316,6 +316,7 @@
     "pairingSave": "保存",
     "pairingRotate": "轮换凭据",
     "pairingRevoke": "吊销",
+    "pairingForget": "删除这条已吊销的记录",
     "about": "关于",
     "aboutDesc": "关于 zxySSH 的信息。",
     "appTitle": "zxySSH",

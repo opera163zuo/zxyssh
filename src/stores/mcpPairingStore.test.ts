@@ -91,6 +91,24 @@ it('re-reads the registry after a revocation and passes the id through', async (
   ]);
 });
 
+it('forgets a revoked record and reloads the list', async () => {
+  safeInvoke
+    .mockImplementationOnce((command, args) => {
+      expect(command).toBe('mcp_agent_forget');
+      expect(args).toEqual({ agentId: 'bbbb2222' });
+      return ok(true);
+    })
+    .mockImplementationOnce(() => ok([]))
+    .mockImplementationOnce(() => ok(null));
+
+  await useMcpPairingStore.getState().forget('bbbb2222');
+  expect(safeInvoke.mock.calls.map((call) => call[0])).toEqual([
+    'mcp_agent_forget',
+    'mcp_agents_list',
+    'mcp_lan_status',
+  ]);
+});
+
 it('leaves a code alone while the registry still has it armed', async () => {
   useMcpPairingStore.setState({ code: { code: '123456', expiresAt: 99 } });
   safeInvoke.mockImplementationOnce((command) => {

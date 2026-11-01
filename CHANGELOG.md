@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### A revoked Agent can finally leave the list
+
+`revoke` marked a record and left it in Settings forever, so after a handful of
+pairing attempts the panel was a column of **已吊销** rows with nothing to do
+about them. Deleting a revoked record is now an action of its own. It refuses
+one whose credential is still live — retire it first — so a stray click cannot
+drop a credential an Agent is actually using.
+
+The row's three actions were text inside a button sized for an icon, which
+wrapped every CJK label onto two lines (**重命/名**, **轮换/凭据**, **吊/销**).
+They are icons now — pencil, key, ban — with the wording as the tooltip and the
+accessible name, and a revoked row carries the single delete control it needs.
+
 ## 2.3.0 — 2026-11-01
 
 ### Pairing follows the listener address
