@@ -37,8 +37,8 @@ use super::approval::{AgentApprovalManager, ApprovalOutcome, ApprovalRequest};
 use super::guard::{self, GuardConfig, GUARD_CONFIG_KEY};
 use super::pairing::{AuthenticatedAgent, PairingRegistry};
 use super::pairing_http::{
-    audit_label, handle_pair, handle_pair_request, handle_pair_status, require_paired_agent,
-    PairRateLimiter,
+    audit_label, handle_onboarding, handle_pair, handle_pair_request, handle_pair_status,
+    require_paired_agent, PairRateLimiter,
 };
 use super::tools::{
     get_compact_agent_tool_definitions, get_compact_tool_definitions, is_agent_tool,
@@ -338,6 +338,7 @@ impl McpServer {
         let state = self.state.clone();
         Router::new()
             .route("/health", get(handle_health))
+            .route("/.well-known/zxyssh-mcp.json", get(handle_onboarding))
             .route("/pair", post(handle_pair))
             .route("/pair/request", post(handle_pair_request))
             .route("/pair/status", post(handle_pair_status))

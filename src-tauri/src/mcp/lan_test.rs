@@ -171,6 +171,27 @@ async fn unauthenticated_mcp_requests_are_rejected() {
 }
 
 #[tokio::test]
+async fn onboarding_metadata_is_public_and_contains_no_credential() {
+    let service = TestService::start().await;
+    let response = reqwest::Client::new()
+        .get(format!("{}/.well-known/zxyssh-mcp.json", service.base_url))
+        .send()
+        .await
+        .expect("onboarding metadata");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = response.json().await.expect("metadata body");
+    assert_eq!(body["service"], "zxyssh");
+    assert_eq!(body["transport"], "streamable-http");
+    assert_eq!(body["mcpEndpoint"], "/mcp");
+    assert_eq!(body["authentication"]["type"], "bearer");
+    assert_eq!(body["authentication"]["oauth"], false);
+    assert_eq!(body["pairing"]["consentEndpoint"], "/pair/request");
+    assert_eq!(body["pairing"]["tokenReturnedByStatus"], false);
+    assert!(serde_json::to_string(&body).unwrap().find("vsh_").is_none());
+    service.shutdown();
+}
+
+#[tokio::test]
 async fn health_stays_public_and_mcp_needs_a_paired_agent() {
     let service = TestService::start().await;
     let health = reqwest::Client::new()

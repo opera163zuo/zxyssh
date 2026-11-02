@@ -44,9 +44,9 @@ pub struct PairPollRequest {
     request_id: String,
 }
 
-/// Body of a codeless pairing request. The key is required, not optional: a
-/// request that will be answered by a human must not be able to come back
-/// carrying its credential in the clear.
+/// Body of a codeless pairing request. The key is optional: keyed requests get
+/// sealed delivery, while HTTP-only requests leave the one-time token with the
+/// local operator after approval.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
@@ -122,7 +122,18 @@ fn reject(status: StatusCode, message: &str) -> Response {
 }
 
 fn unauthorized() -> Response {
-    let mut response = reject(StatusCode::UNAUTHORIZED, "Unauthorized");
+    let mut response = no_store(
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "unauthorized",
+                "message": "zxySSH uses static Bearer authentication; read /.well-known/zxyssh-mcp.json for onboarding",
+                "mcpEndpoint": "/mcp",
+                "consentEndpoint": "/pair/request",
+            })),
+        )
+            .into_response(),
+    );
     response
         .headers_mut()
         .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
@@ -133,6 +144,35 @@ fn lock_registry(
     registry: &Arc<Mutex<PairingRegistry>>,
 ) -> Result<MutexGuard<'_, PairingRegistry>, ()> {
     registry.lock().map_err(|_| ())
+}
+
+/// Public onboarding metadata. It describes how to obtain a credential but
+/// never contains one, so a URL-only MCP client can discover the two pairing
+/// doors without being granted any access.
+pub async fn handle_onboarding() -> Response {
+    no_store(
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "service": "zxyssh",
+                "transport": "streamable-http",
+                "mcpEndpoint": "/mcp",
+                "authentication": {
+                    "type": "bearer",
+                    "oauth": false,
+                },
+                "pairing": {
+                    "codeEndpoint": "/pair",
+                    "consentEndpoint": "/pair/request",
+                    "statusEndpoint": "/pair/status",
+                    "operatorApproval": true,
+                    "clientPublicKeyOptional": true,
+                    "tokenReturnedByStatus": false,
+                },
+            })),
+        )
+            .into_response(),
+    )
 }
 
 pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Response {
@@ -386,7 +426,7 @@ pub async fn require_paired_agent(
     let path = request.uri().path().to_string();
     if matches!(
         path.as_str(),
-        "/pair" | "/pair/request" | "/pair/status" | "/health"
+        "/pair" | "/pair/request" | "/pair/status" | "/health" | "/.well-known/zxyssh-mcp.json"
     ) {
         return no_store(next.run(request).await);
     }

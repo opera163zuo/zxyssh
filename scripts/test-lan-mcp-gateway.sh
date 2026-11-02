@@ -127,6 +127,7 @@ echo "== 2. loopback transport, pairing and authorisation =="
 LB="$WORK/loopback"; mkdir -p "$LB"; chmod 700 "$LB"
 start "$LB" "127.0.0.1:$PORT" || fail "service did not come up: $(cat "$LB/serve.log")"
 expect "health over loopback" "$(curl -s -m 3 "http://127.0.0.1:$PORT/health" | json status)" "ok"
+expect "onboarding metadata is public" "$(curl -s -m 3 "http://127.0.0.1:$PORT/.well-known/zxyssh-mcp.json" | json mcpEndpoint)" "/mcp"
 expect "MCP without a token" "$(http_code "127.0.0.1:$PORT" "")" "401"
 expect "MCP with a forged token" "$(http_code "127.0.0.1:$PORT" "vsh_not_a_real_credential")" "401"
 
