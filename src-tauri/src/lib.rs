@@ -25,8 +25,6 @@ use commands::{
     add_group,
     add_server,
     agent_activity_list,
-    // Agent command guard
-    cancel_agent_auto_approve,
     clear_fingerprints,
     clear_sudo_credential,
     clear_sudo_policy,
@@ -35,8 +33,6 @@ use commands::{
     delete_fingerprint_by_id,
     delete_group,
     delete_server,
-    get_agent_guard_config,
-    get_agent_guard_status,
     get_app_version,
     // Fingerprint commands
     get_fingerprint,
@@ -45,7 +41,6 @@ use commands::{
     get_server_status,
     get_servers,
     list_fingerprints,
-    load_settings,
     local_shell_attach,
     local_shell_create,
     local_shell_detach,
@@ -79,10 +74,8 @@ use commands::{
     pick_workspace_directory,
     probe_host_key,
     read_ssh_key_file,
-    resolve_agent_approval,
     save_credential,
     save_fingerprint,
-    save_settings,
     save_sudo_credential,
     save_sudo_policy,
     session_attach,
@@ -96,7 +89,6 @@ use commands::{
     session_resize,
     session_send_bytes,
     session_send_input,
-    set_agent_guard_config,
     sftp_compress,
     sftp_delete,
     sftp_download_file,
@@ -254,32 +246,12 @@ pub fn run() {
                 let _ = terminal_handle.emit("agent-terminal-input", event);
             });
 
-            let persisted_auto_approve_until = database
-                .get_setting(mcp::approval::AUTO_APPROVE_UNTIL_KEY)?
-                .and_then(|value| value.parse::<i64>().ok());
-            let approval_handle = app.handle().clone();
-            let approval_manager = Arc::new(mcp::AgentApprovalManager::with_auto_approve_until(
-                Arc::new(move |event| match event {
-                    mcp::ApprovalEvent::Request(request) => {
-                        let _ = approval_handle.emit("agent-approval-request", request);
-                    }
-                    mcp::ApprovalEvent::Resolved(resolved) => {
-                        let _ = approval_handle.emit("agent-approval-resolved", resolved);
-                    }
-                    mcp::ApprovalEvent::State(state) => {
-                        let _ = approval_handle.emit("agent-approval-state", state);
-                    }
-                }),
-                persisted_auto_approve_until,
-            ));
-
             let gateway = if primary_install {
                 AgentGateway::start(
                     database.clone(),
                     session_manager.clone(),
                     activity_emitter,
                     terminal_input_emitter,
-                    approval_manager.clone(),
                     agent_input_tracker.clone(),
                 )
             } else {
@@ -290,13 +262,11 @@ pub fn run() {
                     session_manager.clone(),
                     activity_emitter,
                     terminal_input_emitter,
-                    approval_manager.clone(),
                     agent_input_tracker.clone(),
                     app_data_dir.join("agent-gateway.json"),
                 )
             }?;
             app.manage(gateway);
-            app.manage(approval_manager);
 
             if std::env::var_os("ZXYSSH_SKIP_SKILL_AUTO_INSTALL").is_none() {
                 std::thread::spawn(|| {
@@ -334,12 +304,6 @@ pub fn run() {
             get_app_version,
             get_runtime_capabilities,
             get_agent_gateway_status,
-            // Agent command guard
-            cancel_agent_auto_approve,
-            get_agent_guard_config,
-            get_agent_guard_status,
-            resolve_agent_approval,
-            set_agent_guard_config,
             // LAN Agent pairing: one-step code, credential management
             mcp_pair_code_create,
             mcp_pair_code_pending,
@@ -365,9 +329,6 @@ pub fn run() {
             session_detach,
             session_exec_command,
             get_server_status,
-            // Settings persistence (SQLite settings table)
-            load_settings,
-            save_settings,
             // Server management commands
             get_servers,
             add_server,
@@ -407,7 +368,6 @@ pub fn run() {
             commands::local_files::local_file_read,
             commands::local_files::local_file_write,
             commands::local_files::take_pending_open_files,
-            commands::local_files::export_theme_css,
             sftp_compress,
             sftp_extract,
             sftp_get_upload_ignore_config,

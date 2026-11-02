@@ -5,9 +5,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useSessionStore } from '../../stores/sessionStore';
-import { useSettingsStore, themes } from '../../stores/settingsStore';
-import { CUSTOM_THEME_EVENT, customTerminalColors } from '../../lib/customTheme';
 import { CompletionPopup, type CompletionItem } from './CompletionPopup';
+import { themeColors, xtermTheme } from './themeColors';
 import { MobileKeyBar } from './MobileKeyBar';
 import { useCompletion } from './useCompletion';
 import { applyTrackedInput, getClickedInputPosition, getCursorMoveSequence } from './inputCursor';
@@ -25,6 +24,15 @@ interface AgentTerminalInputEvent {
 }
 
 const AGENT_NOTICE_LIFETIME_MS = 12_000;
+
+/**
+ * Fixed terminal presentation. The app ships one colour scheme and one set of
+ * PTY aesthetics on purpose: an Agent drives these terminals, so a human's font
+ * choice must never change what the Agent's own view of a session looks like.
+ */
+const TERMINAL_FONT_SIZE = 14;
+const TERMINAL_FONT_FAMILY = 'JetBrains Mono, Menlo, Monaco, Consolas, monospace';
+const TERMINAL_SCROLLBACK_LINES = 10_000;
 
 function fitTerminalIfRenderable(fitAddon: FitAddon, terminalElement: HTMLElement | null): boolean {
   if (!terminalElement?.isConnected) return false;
@@ -192,7 +200,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const receivedDataRef = useRef(false);
     const [agentNotices, setAgentNotices] = useState<AgentTerminalInputEvent[]>([]);
     const agentNoticeTimersRef = useRef<Map<string, number>>(new Map());
-    const agentInputColorRef = useRef(themes[0].colors.magenta);
+    const agentInputColorRef = useRef(themeColors.magenta);
 
     const inputBufferRef = useRef<string>('');
     const cursorPositionRef = useRef<number>(0);
@@ -207,7 +215,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const sendLocalShellInput = useSessionStore((s) => s.sendLocalShellInput);
     const sendLocalShellInputFast = useSessionStore((s) => s.sendLocalShellInputFast);
     const resizeLocalShellSession = useSessionStore((s) => s.resizeLocalShellSession);
-    const { settings } = useSettingsStore();
 
     const sessionType = useSessionType(sessionId);
     const serverId = useSessionServerId(sessionId);
@@ -226,10 +233,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     useEffect(() => { sendInputForSessionRef.current = sendInputForSession; }, [sendInputForSession]);
     useEffect(() => { resizeForSessionRef.current = resizeSessionForSession; }, [resizeSessionForSession]);
     useEffect(() => { onDataRef.current = onData; }, [onData]);
-    useEffect(() => {
-      const currentTheme = themes.find((theme) => theme.name === settings.appearance.theme);
-      agentInputColorRef.current = (currentTheme ?? themes[0]).colors.magenta;
-    }, [settings.appearance.theme]);
     const [completionState, completionActions] = useCompletion(
       serverId ? `server:${serverId}` : 'global'
     );
@@ -608,35 +611,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       agentNoticeTimersRef.current.clear();
     }, []);
 
-    const getXtermTheme = useCallback(() => {
-      const currentTheme = themes.find((t) => t.name === settings.appearance.theme);
-      const baseColors = currentTheme?.colors || themes[0].colors;
-      const isLight = currentTheme?.name === 'paper-white' || currentTheme?.name === 'warm-ivory';
-      return {
-        background: baseColors.bg,
-        foreground: baseColors.fg,
-        cursor: baseColors.accent,
-        cursorAccent: baseColors.bg,
-        selectionBackground: baseColors.bgHl,
-        black: isLight ? baseColors.fg : baseColors.bgHl,
-        red: baseColors.red,
-        green: baseColors.green,
-        yellow: baseColors.yellow,
-        blue: baseColors.accent,
-        magenta: baseColors.magenta,
-        cyan: baseColors.cyan,
-        white: isLight ? baseColors.fgDark : baseColors.fg,
-        brightBlack: baseColors.fgDark,
-        brightRed: baseColors.red,
-        brightGreen: baseColors.green,
-        brightYellow: baseColors.yellow,
-        brightBlue: baseColors.accent,
-        brightMagenta: baseColors.magenta,
-        brightCyan: baseColors.cyan,
-        brightWhite: baseColors.fg,
-      };
-    }, [settings.appearance.theme]);
-
     useEffect(() => {
       const initializationFrame = requestAnimationFrame(() => {
         setTerminalInitializationFor(sessionId);
@@ -651,12 +625,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const terminalElement = terminalRef.current;
 
       const xterm = new XTerm({
-        theme: { ...getXtermTheme(), ...customTerminalColors() },
-        fontSize: settings.terminal.fontSize,
-        fontFamily: `${settings.terminal.fontFamily}, Menlo, Monaco, Consolas, monospace`,
-        cursorBlink: settings.terminal.cursorBlink,
-        cursorStyle: settings.terminal.cursorStyle,
-        scrollback: settings.terminal.scrollbackLines,
+        theme: xtermTheme,
+        fontSize: TERMINAL_FONT_SIZE,
+        fontFamily: TERMINAL_FONT_FAMILY,
+        cursorBlink: true,
+        cursorStyle: 'block',
+        scrollback: TERMINAL_SCROLLBACK_LINES,
         fastScrollModifier: 'alt',
         fastScrollSensitivity: 5,
         smoothScrollDuration: 0,
@@ -951,24 +925,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const xterm = xtermRef.current;
       if (!xterm || terminalReadyFor !== sessionId) return;
 
-      xterm.options.fontSize = settings.terminal.fontSize;
-      xterm.options.fontFamily = `${settings.terminal.fontFamily}, Menlo, Monaco, Consolas, monospace`;
-      xterm.options.cursorBlink = settings.terminal.cursorBlink;
-      xterm.options.cursorStyle = settings.terminal.cursorStyle;
-      xterm.options.scrollback = settings.terminal.scrollbackLines;
-      const syncTheme = () => { xterm.options.theme = { ...getXtermTheme(), ...customTerminalColors() }; };
-      syncTheme();
-      window.addEventListener(CUSTOM_THEME_EVENT, syncTheme);
-
       if (fitAddonRef.current) {
         fitTerminalIfRenderable(fitAddonRef.current, terminalRef.current);
       }
-      return () => window.removeEventListener(CUSTOM_THEME_EVENT, syncTheme);
-    }, [sessionId, terminalReadyFor, settings.terminal, settings.appearance.theme, getXtermTheme]);
-
-    const currentTheme = themes.find((t) => t.name === settings.appearance.theme);
-    const themeColors = currentTheme?.colors || themes[0].colors;
-    const bgColor = themeColors.bg;
+    }, [sessionId, terminalReadyFor]);
 
     // Right-click menu items. Presentation and dismissal live in the shared
     // ContextMenu; the handlers are unchanged.
@@ -1028,7 +988,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         <div
           ref={terminalRef}
           className="terminal-viewport w-full min-h-0 flex-1 relative overflow-hidden"
-          style={{ backgroundColor: `var(--tokyo-bg, ${bgColor})` }}
+          style={{ backgroundColor: `var(--tokyo-bg, ${themeColors.bg})` }}
           onContextMenu={handleContextMenu}
         />
 

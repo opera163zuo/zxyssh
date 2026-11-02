@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { ArrowDownLeft, Maximize2, Minus, X } from 'lucide-react';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useThemeSync } from '../../lib/useThemeSync';
 import { Terminal } from '../Terminal';
 import { useFileWorkspaceStore } from '../../stores/fileWorkspaceStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -44,7 +43,6 @@ function bootstrapWindow(): Promise<Handoff> {
 }
 
 export function DetachedWindow({ target }: { target: DetachTarget }) {
-  useThemeSync();
   const { t } = useTranslation();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);

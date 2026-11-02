@@ -16,7 +16,7 @@ Phases 0-4 are implemented and verified end-to-end on a Debian 13 host against a
 - `zxyssh mcp serve` runs headless: Streamable-HTTP JSON-RPC on `/mcp` (`initialize`, `notifications/initialized` answered with `202`, `ping`, `tools/list`, `tools/call`), `/health`, `/pair`.
 - Pairing codes are one-time, 5-minute, 5-attempt, constant-time compared, per-peer rate limited, and persisted so an administrator can mint a code from a different process than the running service.
 - Agent bearer tokens are issued once, stored only as SHA-256 hashes in the device-encrypted registry, and reloaded from disk before every request, so revoke and rotate take effect immediately.
-- Risky commands fail closed on this transport because there is no approval UI; every audited action records the paired Agent identity.
+- Every audited action records the paired Agent identity.
 - `zxyssh mcp credential set|clear` and `zxyssh mcp hostkey probe|trust|list` let a headless server actually reach a target machine without a GUI, with secrets accepted only on stdin and host keys pinned only after the operator repeats the fingerprint.
 - systemd unit, backup/restore and firewall/TLS procedures are documented in `docs/LAN-MCP-UBUNTU-DEBIAN.md`.
 - `bash scripts/test-lan-mcp-gateway.sh [address]` re-runs the whole gate (18 checks: bind guard, pairing, bearer auth, `202` notifications, body limit, encrypted audit, instant revocation) against a throwaway state directory, so an operator can verify a deployment without touching saved user data.
@@ -35,7 +35,7 @@ Not yet delivered, and required before this is called production-ready:
 4. Store only token hashes; encrypt persistent pairing records at rest; never put tokens in URLs or logs.
 5. Let an administrator list paired Agents and revoke or rotate each Agent credential independently.
 6. Bind to loopback by default. LAN binding must be explicit, require at least one valid Agent credential, and support a specific private interface address rather than silently exposing all interfaces.
-7. Preserve audit records and existing command-approval checks. If a risky operation needs human approval and no approval UI exists, fail closed.
+7. Preserve audit records for every paired-Agent operation.
 8. Support a dedicated system user, protected persistent state, systemd startup/restart, graceful shutdown, and documented backup/restore.
 
 ## Security requirements

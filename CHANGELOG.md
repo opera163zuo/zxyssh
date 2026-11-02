@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2.4.0 — 2026-11-03
+
+### Settings now expose only operational choices
+
+The terminal presentation is fixed at 14px JetBrains Mono with a block cursor,
+blinking and 10,000 lines of scrollback. The application now ships one fixed
+Paper White palette; theme picking, system-appearance following, custom CSS,
+wallpaper injection and the unused theme starter are removed. The language
+selector and Agent pairing remain in Settings.
+
+The Agent command-classification and approval system is also removed. Paired
+Agents remain bounded by the tool allowlist, per-Agent session ownership,
+server-side host-key verification and exact sudo policies, while all allowed
+operations continue to be recorded in encrypted activity history.
 
 ### A URL now explains how to connect
 

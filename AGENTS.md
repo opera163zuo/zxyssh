@@ -61,8 +61,8 @@ SessionManager.create_with_credentials()
 - Tests must use injected temporary databases/keys. Never call production data initializers in test helpers or run all ignored tests against user configuration.
 - Credentials must never enter Debug/activity output. Preserve exact secret bytes and atomic metadata/credential updates.
 
-### Theme System
-- CSS variables set on `document.documentElement` from `settingsStore`
+### Fixed Theme
+- Paper White CSS variables are defined statically in `src/styles.css`.
 - Tailwind classes: `bg-tokyo-bg`, `text-tokyo-fg`, `border-tokyo-bg-hl`, etc.
 - **NEVER** use hardcoded hex colors — always use `tokyo-*` Tailwind utilities
 
@@ -122,7 +122,6 @@ Stores in `src/stores/`:
 
 | Store | Purpose |
 |-------|---------|
-| `agentApprovalStore` | Approvals for dangerous AI-agent commands (Agent Gateway) |
 | `agentActivityStore` | Durable operation history, incremental recovery and pagination |
 | `fileWorkspaceStore` | Open local/SFTP files + viewer state |
 | `fingerprintStore` | SSH host key verification |
@@ -133,12 +132,12 @@ Stores in `src/stores/`:
 | `runtimeCapabilitiesStore` | Runtime capability flags (platform, local shell, agent gateway, updater) |
 | `serverStore` | Server/group CRUD |
 | `sessionStore` | SSH session lifecycle |
-| `settingsStore` | App settings + themes |
+| `settingsStore` | SFTP 上传忽略规则与只读 Gateway/版本状态 |
 | `updateStore` | App update check/download state |
 
 ## Tauri Commands
 
-Organized by module under `src-tauri/src/commands/`: `session`, `server`, `sftp`, `fingerprint`, `local_shell`, `dialog`, `settings`, `plugin`, `local_files`, `workspace_window`, `agent`, `app`, `platform`.
+Organized by module under `src-tauri/src/commands/`: `session`, `server`, `sftp`, `fingerprint`, `local_shell`, `dialog`, `plugin`, `local_files`, `workspace_window`, `agent`, `app`, `platform`.
 
 All registered in `src-tauri/src/lib.rs` → `invoke_handler`. The `snippet`, `history`, `tunnel`, `dbconn`, `coding_agent`, `logging` (session recording), `cloud_sync` and `install` (the Settings → Skills surface) command modules were removed with their UI; do not re-register them to fix a missing frontend call.
 

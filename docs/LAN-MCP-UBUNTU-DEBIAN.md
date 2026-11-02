@@ -11,7 +11,7 @@ Hermes / any MCP client  ──HTTP + Bearer token──▶  zxyssh mcp serve  �
 
 Verified on Debian 13 with an isolated loopback OpenSSH container: pairing,
 `initialize`, `tools/list`, `server_add`, key-based `session_create`, `exec`,
-`sftp_ls`, fail-closed approval, and immediate revocation.
+`sftp_ls`, encrypted audit records, and immediate revocation.
 
 ## 1. Install the same-user service
 
@@ -216,10 +216,6 @@ systemctl --user start zxyssh-mcp.service
 
 ## 8. What this service does not do
 
-- **No self-approval.** Risky commands are gated by the human approval UI, which
-  a headless process does not have. Such a call fails closed with
-  `Command requires user approval, but no approval UI is available.` Read-only
-  and non-flagged operations run normally.
 - **No shared isolation between Agents.** They share one database, but each paired HTTP Agent can only use sessions it created through the LAN tool surface. Two Agents are still not full tenants; saved sites and the configured sudo capability are common to the service.
 - **No arbitrary root shell guarantee.** `session_sudo` is an explicit configured-password operation; any Agent with the token can request the configured site's sudo capability. Do not configure it unless that is intended, and do not treat it as protection from a command running as root on the target host.
 - **No TLS in the process.** Use a proxy or a private network, as above.

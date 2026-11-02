@@ -1,14 +1,12 @@
 import { useEffect, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
-import { useSettingsStore, themes, type ThemeDefinition } from '../../stores/settingsStore';
 import { categoryInfo, categoryThemeColor, type CommandCategory } from './completionData';
-
-type ThemeColors = ThemeDefinition['colors'];
+import { themeColors, type ThemeColors } from './themeColors';
 
 /**
- * Resolve a category's accent color from the active theme so badges and icons
- * follow the user's theme instead of hardcoded hex values.
+ * Resolve a category's accent colour so badges and icons follow the palette
+ * instead of hardcoded hex values.
  */
 const getCategoryColor = (
   category: CommandCategory | undefined,
@@ -320,11 +318,6 @@ export const CompletionPopup = memo(function CompletionPopup({
 }: CompletionPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
-  const { settings } = useSettingsStore();
-
-  // Get current theme colors
-  const currentTheme = themes.find(t => t.name === settings.appearance.theme);
-  const themeColors = currentTheme?.colors || themes[0].colors;
 
   // Scroll selected item into view
   useEffect(() => {

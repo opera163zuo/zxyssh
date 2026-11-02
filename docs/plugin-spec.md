@@ -221,11 +221,11 @@ The host renders `program` + `args` (with quoted inputs), then:
   checks, validated inputs and execution implementation. An operation records
   its rendered command and lifecycle in the encrypted local activity store;
   passwords supplied through protected stdin are not recorded.
-- `requiresConfirmation`, elevation, optional sudo and command-risk policy
-  MUST be checked by the backend. Native CLI callers explicitly provide
-  `--confirm` only after human consent. MCP MUST obtain human approval through
-  the gateway; a model-supplied `confirmed` value is not approval. A command
-  that changes while approval is pending MUST require a new review.
+- `requiresConfirmation`, elevation and optional sudo MUST be checked by the
+  backend. This version exposes no plugin execution surface to paired MCP
+  Agents or to the CLI; adding one must define its confirmation semantics as
+  part of that new surface, and a model-supplied `confirmed` value alone is not
+  sufficient authorization.
 
 ## 7. Lifecycle
 

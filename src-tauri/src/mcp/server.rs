@@ -33,8 +33,7 @@ use crate::sftp::{
 use crate::storage::models::{AuthType, Server};
 use crate::storage::Database;
 
-use super::approval::{AgentApprovalManager, ApprovalOutcome, ApprovalRequest};
-use super::guard::{self, GuardConfig, GUARD_CONFIG_KEY};
+use super::agent_input::SharedAgentInputTracker;
 use super::pairing::{AuthenticatedAgent, PairingRegistry};
 use super::pairing_http::{
     audit_label, handle_onboarding, handle_pair, handle_pair_request, handle_pair_status,
@@ -62,8 +61,7 @@ pub struct McpState {
     pub session_manager: Arc<SessionManager>,
     activity_emitter: Option<Arc<dyn Fn(AgentActivityEvent) + Send + Sync>>,
     terminal_input_emitter: Option<Arc<dyn Fn(TerminalInputEvent) + Send + Sync>>,
-    approvals: Option<Arc<AgentApprovalManager>>,
-    agent_input_tracker: Arc<guard::SharedAgentInputTracker>,
+    agent_input_tracker: Arc<SharedAgentInputTracker>,
     pub(super) pairing_registry: Option<Arc<std::sync::Mutex<PairingRegistry>>>,
     pub(super) pairing_limiter: Arc<std::sync::Mutex<PairRateLimiter>>,
     pub(super) pairing_poll_limiter: Arc<std::sync::Mutex<PairRateLimiter>>,
@@ -78,7 +76,6 @@ impl McpState {
             session_manager,
             activity_emitter: None,
             terminal_input_emitter: None,
-            approvals: None,
             agent_input_tracker,
             pairing_registry: None,
             pairing_limiter: Arc::new(std::sync::Mutex::new(PairRateLimiter::default())),
@@ -113,15 +110,7 @@ impl McpState {
         self
     }
 
-    pub fn with_approvals(mut self, approvals: Arc<AgentApprovalManager>) -> Self {
-        self.approvals = Some(approvals);
-        self
-    }
-
-    pub fn with_agent_input_tracker(
-        mut self,
-        tracker: Arc<guard::SharedAgentInputTracker>,
-    ) -> Self {
+    pub fn with_agent_input_tracker(mut self, tracker: Arc<SharedAgentInputTracker>) -> Self {
         self.agent_input_tracker = tracker;
         self
     }
@@ -187,46 +176,6 @@ impl McpState {
             if let Some(owned) = sessions.get_mut(&agent.id) {
                 owned.remove(session_id);
             }
-        }
-    }
-
-    /// Load the persisted command-guard configuration (falling back to safe
-    /// defaults when unset or unparseable).
-    fn load_guard_config(&self) -> GuardConfig {
-        let json = self.database.get_setting(GUARD_CONFIG_KEY).ok().flatten();
-        GuardConfig::from_stored_json(json.as_deref())
-    }
-
-    /// Block until the user approves a risky command, or return an error string
-    /// (surfaced to the agent) when denied. A transport without a GUI approval
-    /// manager fails closed instead of silently executing a risky command.
-    async fn require_approval(
-        &self,
-        tool: &str,
-        session_id: Option<&str>,
-        command: &str,
-        reasons: Vec<String>,
-    ) -> Result<(), String> {
-        let Some(approvals) = &self.approvals else {
-            return Err(
-                "Command requires user approval, but no approval UI is available.".to_string(),
-            );
-        };
-
-        match approvals
-            .gate(ApprovalRequest {
-                tool: tool.to_string(),
-                command: command.to_string(),
-                reasons,
-                session_id: session_id.map(ToOwned::to_owned),
-            })
-            .await
-        {
-            ApprovalOutcome::Approved => Ok(()),
-            ApprovalOutcome::Denied(reason) => Err(format!(
-                "Command requires user approval and was not granted ({}).",
-                reason
-            )),
         }
     }
 }
@@ -308,15 +257,7 @@ impl McpServer {
         self
     }
 
-    pub fn with_approvals(mut self, approvals: Arc<AgentApprovalManager>) -> Self {
-        self.state = self.state.with_approvals(approvals);
-        self
-    }
-
-    pub fn with_agent_input_tracker(
-        mut self,
-        tracker: Arc<guard::SharedAgentInputTracker>,
-    ) -> Self {
+    pub fn with_agent_input_tracker(mut self, tracker: Arc<SharedAgentInputTracker>) -> Self {
         self.state = self.state.with_agent_input_tracker(tracker);
         self
     }
@@ -1347,39 +1288,6 @@ async fn tool_session_send_input(
         )
         .await;
 
-    // Gate and surface commands that will actually execute in the shared terminal.
-    let cfg = state.load_guard_config();
-    for command in &executed_commands {
-        if cfg.enabled {
-            let mut decision = guard::classify_command(&command.command, &cfg);
-            if !command.is_verifiable {
-                decision.requires_approval = true;
-                decision.reasons.push(
-                    "Shell history, completion, or cursor editing hides the final command text"
-                        .to_string(),
-                );
-            }
-            if decision.requires_approval {
-                if let Err(error) = state
-                    .require_approval(
-                        "session_send_input",
-                        Some(&resolved_session_id),
-                        if redact {
-                            "[sensitive input omitted]"
-                        } else {
-                            &command.command
-                        },
-                        decision.reasons,
-                    )
-                    .await
-                {
-                    state.agent_input_tracker.restore(tracker_checkpoint).await;
-                    return Err(error);
-                }
-            }
-        }
-    }
-
     let mut input_events = Vec::new();
     for command in executed_commands {
         let event = AgentActivityEvent {
@@ -1584,22 +1492,8 @@ async fn tool_exec(state: &McpState, args: &Value) -> Result<String, String> {
     let session = resolve_session(state, session_id).await?;
     let resolved_session_id = session.id.clone();
 
-    // Gate risky exec commands, then surface them in the shared terminal so the
-    // human collaborator can see out-of-band work too.
-    let cfg = state.load_guard_config();
-    if cfg.enabled && cfg.require_for_exec {
-        let decision = guard::classify_command(command, &cfg);
-        if decision.requires_approval {
-            state
-                .require_approval(
-                    "exec",
-                    Some(&resolved_session_id),
-                    command,
-                    decision.reasons,
-                )
-                .await?;
-        }
-    }
+    // Surface out-of-band work in the shared terminal so the human collaborator
+    // can see it too.
     state.emit_terminal_input(
         &resolved_session_id,
         command.to_string(),
@@ -2425,22 +2319,6 @@ mod tests {
         assert!(result["tools"].is_array());
         let tools = result["tools"].as_array().unwrap();
         assert!(!tools.is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_transport_without_an_approval_ui_fails_closed() {
-        let temp = tempfile::tempdir().unwrap();
-        let database = Arc::new(Database::new_at(temp.path().join("guard.db")).unwrap());
-        let session_manager = Arc::new(SessionManager::new(database.clone()));
-        let state = McpState::new(database, session_manager);
-        let error = state
-            .require_approval("exec", None, "rm -rf /", vec!["destructive".to_string()])
-            .await
-            .expect_err("headless transports must not self-approve");
-        assert!(
-            error.contains("no approval UI is available"),
-            "unexpected error: {error}"
-        );
     }
 
     #[tokio::test]
