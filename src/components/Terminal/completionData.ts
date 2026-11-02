@@ -2,7 +2,7 @@
  * Command completion data source for terminal autocomplete functionality.
  * Contains common shell commands, their descriptions, and subcommands.
  */
-import type { ThemeDefinition } from '../../stores/settingsStore';
+import type { ThemeColorKey } from './themeColors';
 
 /**
  * Represents a command suggestion with metadata.
@@ -53,7 +53,7 @@ export const categoryInfo: Record<CommandCategory, { label: string }> = {
  * Key of a theme color used to render each category's accent, so category
  * badges follow the active theme instead of hardcoded hex values.
  */
-export const categoryThemeColor: Record<CommandCategory, keyof ThemeDefinition['colors']> = {
+export const categoryThemeColor: Record<CommandCategory, ThemeColorKey> = {
   navigation: 'accent',
   file: 'green',
   text: 'yellow',

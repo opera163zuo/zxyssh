@@ -230,40 +230,11 @@ pub async fn local_file_write(request: LocalWriteRequest) -> Result<(), String> 
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn export_theme_css(css: String) -> Result<Option<String>, String> {
-    if css.len() > 2 * 1024 * 1024 {
-        return Err("CSS export exceeds 2 MiB".into());
-    }
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("Export zxySSH CSS theme")
-        .set_file_name("zxyssh-theme.css")
-        .add_filter("CSS theme", &["css"])
-        .save_file()
-        .await;
-    let Some(file) = file else {
-        return Ok(None);
-    };
-    let path = file.path().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || {
-        fs::write(&path, css).map_err(|e| e.to_string())?;
-        Ok(Some(path.to_string_lossy().into_owned()))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 pub fn install_workspace_menu(app: &tauri::App) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
     let open = MenuItemBuilder::with_id("zxyssh-open-files", "Open Files… / 打开文件")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
-    let recover = MenuItemBuilder::with_id(
-        "zxyssh-recover-theme",
-        "Disable Custom CSS / 停用自定义 CSS",
-    )
-    .accelerator("CmdOrCtrl+Shift+F12")
-    .build(app)?;
     // Built from scratch rather than Menu::default(): the default menu also adds
     // a Window submenu (minimize/maximize/close, which muda leaves unrendered on
     // Linux and which duplicate the title-bar buttons) and a Help/About dialog
@@ -282,17 +253,13 @@ pub fn install_workspace_menu(app: &tauri::App) -> tauri::Result<()> {
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    let submenu = Submenu::with_items(app, "Workspace", true, &[&open, &recover])?;
+    let submenu = Submenu::with_items(app, "Workspace", true, &[&open])?;
     let menu = Menu::with_items(app, &[&edit, &submenu])?;
     app.set_menu(menu)?;
-    app.on_menu_event(|app, event| match event.id().as_ref() {
-        "zxyssh-open-files" => {
+    app.on_menu_event(|app, event| {
+        if event.id().as_ref() == "zxyssh-open-files" {
             let _ = app.emit_to("main", "zxyssh://choose-local-files", ());
         }
-        "zxyssh-recover-theme" => {
-            let _ = app.emit("zxyssh://disable-custom-css", ());
-        }
-        _ => {}
     });
     Ok(())
 }

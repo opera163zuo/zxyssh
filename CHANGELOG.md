@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2.4.0 — 2026-11-03
+
+### Settings now expose only operational choices
+
+The terminal presentation is fixed at 14px JetBrains Mono with a block cursor,
+blinking and 10,000 lines of scrollback. The application now ships one fixed
+Paper White palette; theme picking, system-appearance following, custom CSS,
+wallpaper injection and the unused theme starter are removed. The language
+selector and Agent pairing remain in Settings.
+
+The Agent command-classification and approval system is also removed. Paired
+Agents remain bounded by the tool allowlist, per-Agent session ownership,
+server-side host-key verification and exact sudo policies, while all allowed
+operations continue to be recorded in encrypted activity history.
 
 ### A URL now explains how to connect
 
@@ -26,13 +39,13 @@ the same row has approve and reject buttons. Headless, `zxyssh mcp requests list
 and `requests approve <id>` do the same job. Because this CLI makes an ephemeral
 key, approval seals the credential to it and its poll takes the result once.
 
-A URL-only Agent can send `POST /pair/request {"name"}` without a key. Approval
-still creates the credential only at the button press, but the token is returned
-only to the local desktop/CLI for the operator to put in the Agent's managed
-secret store; `/pair/status` says `approved` and never carries that token. This
-lets an Agent that cannot receive secrets in chat request access by URL alone.
-A request nobody answers expires after 900 seconds having issued nothing, and
-refusing one leaves nothing to revoke.
+A URL-only Agent sends `POST /pair/request {"name"}` with no key. Approval still
+creates the credential only at the button press, and now the Agent that asked is
+the Agent that receives it: `/pair/status` answers `delivered` with the bearer
+token in it, once, so **nothing is shown to the operator to copy**. A second poll
+on the same request id carries no credential. A request nobody answers expires
+after 900 seconds having issued nothing, and refusing one leaves nothing to
+revoke.
 
 The code door is unchanged and still the default way in: a correct six-digit
 code pairs immediately, with no approval step, because an unattended host cannot

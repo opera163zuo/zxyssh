@@ -120,15 +120,7 @@ pub fn prepare(
         None
     };
     let command = render_command(&action, &request.inputs, use_sudo, stdin.is_some())?;
-    let config = crate::mcp::GuardConfig::from_stored_json(
-        db.get_setting(crate::mcp::guard::GUARD_CONFIG_KEY)
-            .map_err(|e| e.to_string())?
-            .as_deref(),
-    );
-    let requires_confirmation = action.requires_confirmation
-        || use_sudo
-        || (config.enabled
-            && crate::mcp::guard::classify_command(&command, &config).requires_approval);
+    let requires_confirmation = action.requires_confirmation || use_sudo;
     Ok(PreparedAction {
         command,
         stdin,

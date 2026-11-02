@@ -44,15 +44,13 @@ pub struct PairPollRequest {
     request_id: String,
 }
 
-/// Body of a codeless pairing request. The key is optional: keyed requests get
-/// sealed delivery, while HTTP-only requests leave the one-time token with the
-/// local operator after approval.
+/// Body of a codeless pairing request. The key is optional: with one, approval
+/// seals the credential to that agent; without one, approval hands the bearer
+/// token straight back to the requestor.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
     name: String,
-    /// Optional for HTTP-only agents. With a key, approval seals delivery to
-    /// that agent; without one, the token is shown only in the local operator UI.
     #[serde(default, alias = "clientPublicKey")]
     client_public_key: Option<String>,
 }
@@ -167,7 +165,7 @@ pub async fn handle_onboarding() -> Response {
                     "statusEndpoint": "/pair/status",
                     "operatorApproval": true,
                     "clientPublicKeyOptional": true,
-                    "tokenReturnedByStatus": false,
+                    "tokenReturnedByStatus": true,
                 },
             })),
         )
@@ -330,7 +328,7 @@ pub async fn handle_pair_request(State(state): State<McpState>, request: Request
 }
 
 /// Delivery endpoint for a queued pairing request. It answers nothing about
-/// other requests, and the sealed credential is returned only once.
+/// other requests, and the credential is returned only once.
 pub async fn handle_pair_status(State(state): State<McpState>, request: Request) -> Response {
     let Some(registry) = &state.pairing_registry else {
         return reject(
@@ -376,17 +374,17 @@ pub async fn handle_pair_status(State(state): State<McpState>, request: Request)
         Err(_) => return reject(StatusCode::INTERNAL_SERVER_ERROR, "Pairing failed"),
     };
     let mut body = serde_json::json!({ "status": status_name(poll.status) });
-    if matches!(
-        poll.status,
-        PairRequestStatus::OperatorApproved | PairRequestStatus::Delivered
-    ) {
+    if poll.status == PairRequestStatus::Delivered {
         if let (Some(id), Some(name)) = (poll.agent_id, poll.agent_name) {
             body["agentId"] = serde_json::Value::String(id);
             body["name"] = serde_json::Value::String(name);
         }
-    }
-    if poll.status == PairRequestStatus::Delivered {
-        if let (Some(public_key), Some(sealed)) = (poll.server_public_key, poll.sealed_credential) {
+        if let Some(token) = poll.credential {
+            body["token"] = serde_json::Value::String(token);
+            body["tokenType"] = serde_json::Value::String("Bearer".to_string());
+        } else if let (Some(public_key), Some(sealed)) =
+            (poll.server_public_key, poll.sealed_credential)
+        {
             body["serverPublicKey"] = serde_json::Value::String(public_key);
             body["sealedToken"] = serde_json::Value::String(sealed);
             body["tokenType"] = serde_json::Value::String("Bearer-sealed".to_string());
@@ -401,6 +399,8 @@ fn status_name(status: PairRequestStatus) -> &'static str {
         // keep parsing it; the state now means "sealing, poll again".
         PairRequestStatus::AwaitingDelivery => "awaiting_approval",
         PairRequestStatus::AwaitingConsent => "awaiting_consent",
+        // Never served: `poll_request` releases a keyless credential as
+        // `delivered`. The arm exists because the state can be persisted.
         PairRequestStatus::OperatorApproved => "approved",
         PairRequestStatus::Refused => "refused",
         PairRequestStatus::Approved => "approved",

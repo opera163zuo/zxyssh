@@ -8,7 +8,6 @@ pub mod platform;
 pub mod plugin;
 pub mod server;
 pub mod session;
-pub mod settings;
 pub mod sftp;
 pub mod workspace_window;
 
@@ -21,7 +20,6 @@ pub use platform::*;
 pub use plugin::*;
 pub use server::*;
 pub use session::*;
-pub use settings::*;
 pub use sftp::*;
 
 // Re-export server status types for use in frontend

@@ -67,7 +67,6 @@ it('reads the Agents, the waiting list and the listener in one refresh', async (
           peer: '192.168.0.7:51234',
           createdAt: 0,
           expiresAt: 900,
-          clientHasKey: true,
         },
       ]),
   });
@@ -129,8 +128,7 @@ it('forgets a revoked record and reloads the list', async () => {
 
 it('approving a request reloads so the new Agent appears at once', async () => {
   route({
-    mcp_pair_request_approve: () =>
-      ok({ agent: { id: 'a2', name: 'opencode', revoked: false }, token: null }),
+    mcp_pair_request_approve: () => ok({ id: 'a2', name: 'opencode', revoked: false }),
   });
 
   await useMcpPairingStore.getState().approveRequest('r1');
@@ -143,14 +141,13 @@ it('approving a request reloads so the new Agent appears at once', async () => {
   expect(safeInvoke.mock.calls[0][1]).toEqual({ requestId: 'r1' });
 });
 
-it('keeps an HTTP-only consent token in the one-time local banner', async () => {
+it('keeps no credential in the panel after approving, because the Agent collects it', async () => {
   route({
-    mcp_pair_request_approve: () =>
-      ok({ agent: { id: 'a3', name: 'hermes', revoked: false }, token: 'vsh_once' }),
+    mcp_pair_request_approve: () => ok({ id: 'a3', name: 'hermes', revoked: false }),
   });
 
   await useMcpPairingStore.getState().approveRequest('r-http');
-  expect(useMcpPairingStore.getState().issuedToken).toBe('vsh_once');
+  expect(useMcpPairingStore.getState().issuedToken).toBeNull();
   expect(calls()).toEqual([
     'mcp_pair_request_approve',
     'mcp_agents_list',
@@ -181,7 +178,6 @@ it('polls only the waiting list in the background', async () => {
           peer: '192.168.0.30:1',
           createdAt: 0,
           expiresAt: 9,
-          clientHasKey: false,
         },
       ]),
   });

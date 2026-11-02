@@ -129,40 +129,11 @@ vi.mock('./stores/notificationStore', () => ({
 
 vi.mock('./stores/settingsStore', () => {
   const getState = () => ({
-    settings: {
-      appearance: {
-        theme: 'test-theme',
-        themeMode: 'dark',
-        lightTheme: 'paper-white',
-        darkTheme: 'test-theme',
-      },
-    },
     initializeSettings: testState.actions.initializeSettings,
-    updateAppearanceSettings: vi.fn(),
   });
   const useSettingsStore = (selector?: (state: ReturnType<typeof getState>) => unknown) =>
     selector ? selector(getState()) : getState();
-  return {
-    useSettingsStore: Object.assign(useSettingsStore, { getState }),
-    themes: [{
-      name: 'test-theme',
-      colors: {
-        bg: '#000000',
-        bgDark: '#000000',
-        bgHl: '#111111',
-        fg: '#ffffff',
-        fgDark: '#aaaaaa',
-        accent: '#00aaff',
-        onAccent: '#000000',
-        red: '#ff0000',
-        green: '#00ff00',
-        yellow: '#ffff00',
-        magenta: '#ff00ff',
-        cyan: '#00ffff',
-        orange: '#ff8800',
-      },
-    }],
-  };
+  return { useSettingsStore: Object.assign(useSettingsStore, { getState }) };
 });
 
 vi.mock('./stores/updateStore', () => {
