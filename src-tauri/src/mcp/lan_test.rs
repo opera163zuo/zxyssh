@@ -186,7 +186,7 @@ async fn onboarding_metadata_is_public_and_contains_no_credential() {
     assert_eq!(body["authentication"]["type"], "bearer");
     assert_eq!(body["authentication"]["oauth"], false);
     assert_eq!(body["pairing"]["consentEndpoint"], "/pair/request");
-    assert_eq!(body["pairing"]["tokenReturnedByStatus"], false);
+    assert_eq!(body["pairing"]["tokenReturnedByStatus"], true);
     assert!(serde_json::to_string(&body).unwrap().find("vsh_").is_none());
     service.shutdown();
 }
@@ -510,8 +510,7 @@ async fn a_codeless_request_waits_for_the_operator_then_delivers_sealed() {
         .approve_request(&request_id, now)
         .expect("approve")
         .expect("approved request");
-    assert_eq!(summary.agent.name, "hermes-consent");
-    assert!(summary.token.is_none());
+    assert_eq!(summary.name, "hermes-consent");
 
     let text = service.poll_text(&request_id).await;
     assert!(
@@ -535,7 +534,7 @@ async fn a_codeless_request_waits_for_the_operator_then_delivers_sealed() {
 }
 
 #[tokio::test]
-async fn http_only_consent_shows_token_to_operator_but_never_to_poller() {
+async fn a_keyless_consent_approval_hands_the_token_to_the_requestor_once() {
     let service = TestService::start().await;
     let response = reqwest::Client::new()
         .post(format!("{}/pair/request", service.base_url))
@@ -552,30 +551,39 @@ async fn http_only_consent_shows_token_to_operator_but_never_to_poller() {
     assert_eq!(waiting["status"], "awaiting_consent");
     assert!(waiting.get("token").is_none());
 
-    let approval = service
+    let agent = service
         .registry
         .lock()
         .unwrap()
         .approve_request(&request_id, chrono::Utc::now().timestamp())
         .expect("approve")
         .expect("approved request");
-    let token = approval
-        .token
-        .expect("local operator receives one-time token");
-    assert!(service
-        .registry
-        .lock()
-        .unwrap()
-        .authenticate(&token)
-        .is_some());
 
-    let (status, approved) = service.poll(&request_id).await;
+    let (status, delivered) = service.poll(&request_id).await;
     assert_eq!(status, reqwest::StatusCode::OK);
-    assert_eq!(approved["status"], "approved");
-    assert_eq!(approved["agentId"], approval.agent.id);
-    assert!(approved.get("token").is_none());
-    assert!(approved.get("sealedToken").is_none());
-    assert!(!serde_json::to_string(&approved).unwrap().contains(&token));
+    assert_eq!(delivered["status"], "delivered");
+    assert_eq!(delivered["agentId"], agent.id);
+    assert_eq!(delivered["tokenType"], "Bearer");
+    let token = delivered["token"]
+        .as_str()
+        .expect("bearer token")
+        .to_string();
+    assert!(token.starts_with("vsh_"));
+
+    let ping = service
+        .rpc(
+            Some(&token),
+            json!({"jsonrpc":"2.0","id":1,"method":"ping","params":{}}),
+        )
+        .await;
+    assert_eq!(ping.status(), reqwest::StatusCode::OK);
+
+    let (_, replay) = service.poll(&request_id).await;
+    assert_eq!(replay["status"], "delivered");
+    assert!(
+        replay.get("token").is_none(),
+        "the credential must not be handed out twice"
+    );
     service.shutdown();
 }
 

@@ -83,13 +83,23 @@ pub async fn pair(
     }
     let request_id =
         field(&body, "requestId").ok_or_else(|| anyhow!("pairing response had no requestId"))?;
-    await_delivery(&client, endpoint, &request_id, key_pair, name, wait, poll).await
+    await_delivery(
+        &client,
+        endpoint,
+        &request_id,
+        Some(key_pair),
+        name,
+        wait,
+        poll,
+    )
+    .await
 }
 
 /// Ask a listener to pair this machine with no code in hand. Nothing exists for
 /// this Agent until an operator approves the request, so the caller waits —
 /// which is the point: no secret has to travel through the Agent's own chat log
-/// for the pairing to happen.
+/// for the pairing to happen, and the credential comes back to this client when
+/// the operator clicks approve.
 pub async fn request_pairing(
     endpoint: &str,
     name: &str,
@@ -101,11 +111,10 @@ pub async fn request_pairing(
         .timeout(Duration::from_secs(30))
         .build()
         .context("build pairing client")?;
-    let key_pair = pair_crypto::ephemeral_private_key()?;
 
     let response = client
         .post(format!("{endpoint}/pair/request"))
-        .json(&json!({ "name": name, "clientPublicKey": public_key_b64(&key_pair)? }))
+        .json(&json!({ "name": name }))
         .send()
         .await
         .context("pairing request failed")?;
@@ -126,7 +135,7 @@ pub async fn request_pairing(
     })?;
     let request_id = field(&body, "requestId")
         .ok_or_else(|| anyhow!("pairing request response had no requestId"))?;
-    await_delivery(&client, endpoint, &request_id, key_pair, name, wait, poll).await
+    await_delivery(&client, endpoint, &request_id, None, name, wait, poll).await
 }
 
 /// Poll until the service hands over the credential, exactly once.
@@ -135,11 +144,12 @@ async fn await_delivery(
     client: &reqwest::Client,
     endpoint: &str,
     request_id: &str,
-    key_pair: ring::agreement::EphemeralPrivateKey,
+    key_pair: Option<ring::agreement::EphemeralPrivateKey>,
     name: &str,
     wait: Duration,
     poll: Duration,
 ) -> Result<PairedAgent> {
+    let mut key_pair = key_pair;
     let deadline = std::time::Instant::now() + wait;
     loop {
         if std::time::Instant::now() >= deadline {
@@ -177,12 +187,16 @@ async fn await_delivery(
         })?;
         match field(&body, "status").as_deref() {
             Some("delivered") => {
-                let token = match (field(&body, "sealedToken"), field(&body, "serverPublicKey")) {
-                    (Some(sealed), Some(server_public_key)) => {
+                let token = match (
+                    key_pair.take(),
+                    field(&body, "sealedToken"),
+                    field(&body, "serverPublicKey"),
+                ) {
+                    (Some(key_pair), Some(sealed), Some(server_public_key)) => {
                         pair_crypto::open_sealed(key_pair, &server_public_key, request_id, &sealed)?
                     }
                     _ => field(&body, "token")
-                        .ok_or_else(|| anyhow!("approved pairing carried no credential"))?,
+                        .ok_or_else(|| anyhow!("the approved pairing carried no credential"))?,
                 };
                 return Ok(PairedAgent {
                     agent_id: field(&body, "agentId").unwrap_or_default(),
@@ -190,11 +204,6 @@ async fn await_delivery(
                     sealed: body.get("sealedToken").is_some(),
                     token,
                 });
-            }
-            Some("approved") => {
-                return Err(anyhow!(
-                    "the operator approved this HTTP-only request; ask them to save the one-time credential in the Agent's managed secret store"
-                ))
             }
             Some("refused") | Some("rejected") => {
                 return Err(anyhow!("an operator refused this pairing request"))

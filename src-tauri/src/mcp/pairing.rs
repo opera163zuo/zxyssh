@@ -72,8 +72,8 @@ pub enum PairRequestStatus {
     /// Approved for a client that supplied a public key; its sealed credential
     /// is waiting to be handed back exactly once.
     Approved,
-    /// Approved for an HTTP-only client with no public key. The token was shown
-    /// once to the local operator and must never be returned from `/pair/status`.
+    /// Approved for a client that offered no key; the bearer token itself is
+    /// waiting to be handed to the requestor exactly once.
     OperatorApproved,
     /// An operator refused the request. Kept briefly so the polling Agent learns
     /// it was refused rather than watching its request disappear.
@@ -102,6 +102,12 @@ struct StoredPairRequest {
     agent_id: Option<String>,
     server_public_key: Option<String>,
     sealed_credential: Option<String>,
+    /// Cleartext credential for a request whose client offered no key. The
+    /// desktop and the listener are separate processes, so this has to survive
+    /// in the registry until the requestor polls it; the registry itself is
+    /// encrypted at rest and the value is dropped on delivery.
+    #[serde(default)]
+    credential: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -160,9 +166,9 @@ pub struct AgentSummary {
     pub revoked: bool,
 }
 
-/// One codeless pairing request on the operator's waiting list. The client key
-/// is deliberately absent: the operator decides from the name and the source
-/// address, and the summary is also what the desktop renders.
+/// One codeless pairing request on the operator's waiting list. The credential
+/// material is deliberately absent: the operator decides from the name and the
+/// source address, and the summary is also what the desktop renders.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairRequestSummary {
@@ -171,21 +177,8 @@ pub struct PairRequestSummary {
     pub peer: String,
     pub created_at: i64,
     pub expires_at: i64,
-    pub client_has_key: bool,
 }
 
-/// Result of an operator approving a codeless request. A key-bearing client
-/// receives a sealed credential by polling; a URL-only client leaves the
-/// one-time token with the operator to enter into its managed secret store.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairApproval {
-    pub agent: AgentSummary,
-    pub token: Option<String>,
-}
-
-/// A pairing request as the desktop UI and the CLI show it. Never carries
-/// credential material.
 /// Outcome of a pairing attempt that consumed a code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PairStarted {
@@ -205,6 +198,8 @@ pub struct PairPoll {
     pub server_public_key: Option<String>,
     /// Sealed credential, delivered once.
     pub sealed_credential: Option<String>,
+    /// Bearer credential for a keyless request, delivered once.
+    pub credential: Option<String>,
 }
 
 /// A pairing key must decode from base64url to exactly one X25519 public key.
@@ -398,6 +393,7 @@ impl PairingRegistry {
                 agent_id: None,
                 server_public_key: None,
                 sealed_credential: None,
+                credential: None,
             },
         );
         self.prune_requests(now);
@@ -412,8 +408,9 @@ impl PairingRegistry {
     }
 
     /// Begin a pairing that offers no code. Nothing is issued here: the request
-    /// is optional. With a key, approval seals delivery to that Agent; without
-    /// one, approval returns the token only to the local operator.
+    /// waits for an operator. Approval then creates the credential and hands it
+    /// to the requestor through `/pair/status`, sealed when the client offered a
+    /// key and directly when it did not.
     pub fn begin_request(
         &mut self,
         name: &str,
@@ -459,6 +456,7 @@ impl PairingRegistry {
                 agent_id: None,
                 server_public_key: None,
                 sealed_credential: None,
+                credential: None,
             },
         );
         if let Err(error) = self.persist() {
@@ -468,14 +466,14 @@ impl PairingRegistry {
         Ok(request_id)
     }
 
-    /// Approve a codeless request. The credential is created here and only here;
-    /// keyed requests get sealed delivery, while URL-only requests return the
-    /// token to the local operator for entry into the Agent's managed store.
+    /// Approve a codeless request. The credential is created here and only here,
+    /// and the Agent collects it by polling `/pair/status` — keyed requests get it
+    /// sealed, keyless requests get it directly. The operator never carries it.
     pub fn approve_request(
         &mut self,
         id: &str,
         now: i64,
-    ) -> Result<Option<PairApproval>, PairingError> {
+    ) -> Result<Option<AgentSummary>, PairingError> {
         if !matches!(
             self.state.requests.get(id).map(|request| request.status),
             Some(PairRequestStatus::AwaitingConsent)
@@ -518,37 +516,32 @@ impl PairingRegistry {
                 peer: request.peer.clone(),
                 created_at: request.created_at,
                 expires_at: request.expires_at,
-                client_has_key: request.client_public_key.is_some(),
             })
             .collect();
         waiting.sort_by_key(|request| request.created_at);
         waiting
     }
 
-    /// Issue a credential for a consented request. The token is either sealed to
-    /// the Agent's key or returned once to the local operator; it is never stored
-    /// in plaintext in the encrypted registry.
+    /// Issue a credential for a consented request. A keyless request's token is
+    /// held in the encrypted registry only until the requestor polls it once.
     fn finalize_request(
         &mut self,
         id: &str,
         now: i64,
-    ) -> Result<Option<PairApproval>, PairingError> {
+    ) -> Result<Option<AgentSummary>, PairingError> {
         let Some(request) = self.state.requests.get(id) else {
             return Ok(None);
         };
         if request.status != PairRequestStatus::AwaitingDelivery
             && request.status != PairRequestStatus::AwaitingConsent
         {
-            let agent = request
-                .agent_id
-                .as_ref()
-                .and_then(|agent_id| self.state.agents.get(agent_id))
-                .map(|agent| AgentSummary {
+            return Ok(request.agent_id.as_ref().and_then(|agent_id| {
+                self.state.agents.get(agent_id).map(|agent| AgentSummary {
                     id: agent.id.clone(),
                     name: agent.name.clone(),
                     revoked: agent.revoked,
-                });
-            return Ok(agent.map(|agent| PairApproval { agent, token: None }));
+                })
+            }));
         }
         if now >= request.expires_at {
             self.expire_request(id)?;
@@ -569,13 +562,13 @@ impl PairingRegistry {
             revoked: false,
         };
         let client_public_key = request.client_public_key.clone();
-        let token_for_operator = client_public_key.is_none().then(|| token.clone());
         self.state.agents.insert(agent_id.clone(), agent);
         if let Some(entry) = self.state.requests.get_mut(id) {
             entry.agent_id = Some(agent_id);
             entry.pairing_code.clear();
             entry.server_public_key = None;
             entry.sealed_credential = None;
+            entry.credential = None;
             if let Some(client_public_key) = client_public_key.as_deref() {
                 let envelope = super::pair_crypto::seal_for_agent(
                     super::pair_crypto::ephemeral_private_key()
@@ -589,19 +582,15 @@ impl PairingRegistry {
                 entry.server_public_key = Some(envelope.public_key);
                 entry.sealed_credential = Some(envelope.sealed);
             } else {
-                // The token is returned only to the local operator command/UI.
-                // The unauthenticated HTTP poll will report approval, never the token.
                 entry.status = PairRequestStatus::OperatorApproved;
+                entry.credential = Some(token);
             }
         }
         if let Err(error) = self.persist() {
             self.state = previous;
             return Err(error);
         }
-        Ok(Some(PairApproval {
-            agent: summary,
-            token: token_for_operator,
-        }))
+        Ok(Some(summary))
     }
 
     /// Read one step of a pairing request. An approved credential is released
@@ -622,12 +611,24 @@ impl PairingRegistry {
             }));
         }
         if request.status == PairRequestStatus::OperatorApproved {
-            return Ok(Some(PairPoll {
-                status: PairRequestStatus::OperatorApproved,
+            // A registry written before keyless requests carried their own
+            // credential has an approved row with nothing in it. Say
+            // `delivered` with no token rather than failing the poll forever.
+            let credential = request.credential.clone();
+            let poll = PairPoll {
+                status: PairRequestStatus::Delivered,
                 agent_id: request.agent_id.clone(),
                 agent_name: Some(request.agent_name.clone()),
+                credential,
                 ..PairPoll::default()
-            }));
+            };
+            self.apply(|state| {
+                if let Some(entry) = state.requests.get_mut(id) {
+                    entry.status = PairRequestStatus::Delivered;
+                    entry.credential = None;
+                }
+            })?;
+            return Ok(Some(poll));
         }
         if request.status != PairRequestStatus::Approved {
             return Ok(Some(PairPoll {
@@ -646,12 +647,14 @@ impl PairingRegistry {
             agent_name: Some(request.agent_name.clone()),
             server_public_key: request.server_public_key.clone(),
             sealed_credential: request.sealed_credential.clone(),
+            credential: None,
         };
         self.apply(|state| {
             if let Some(entry) = state.requests.get_mut(id) {
                 entry.status = PairRequestStatus::Delivered;
                 entry.server_public_key = None;
                 entry.sealed_credential = None;
+                entry.credential = None;
             }
         })?;
         Ok(Some(poll))
@@ -663,6 +666,7 @@ impl PairingRegistry {
                 entry.status = PairRequestStatus::Expired;
                 entry.pairing_code = String::new();
                 entry.sealed_credential = None;
+                entry.credential = None;
             }
         })
     }
@@ -677,7 +681,10 @@ impl PairingRegistry {
             }
             // Approved but never fetched: the credential was hashed and issued, and
             // no Agent will ever hold it. Drop the record rather than leave it live.
-            if request.status == PairRequestStatus::Approved {
+            if matches!(
+                request.status,
+                PairRequestStatus::Approved | PairRequestStatus::OperatorApproved
+            ) {
                 if let Some(agent_id) = &request.agent_id {
                     abandoned.push(agent_id.clone());
                 }
@@ -963,8 +970,7 @@ mod tests {
             .approve_request(&id, NOW)
             .unwrap()
             .unwrap_or_else(|| panic!("consent request should be approved"));
-        assert_eq!(approved.agent.name, "hermes");
-        assert!(approved.token.is_none());
+        assert_eq!(approved.name, "hermes");
         assert!(registry.pending_requests().is_empty());
         let poll = registry.poll_request(&id, NOW).unwrap().unwrap();
         assert_eq!(poll.status, PairRequestStatus::Delivered);
@@ -984,31 +990,35 @@ mod tests {
     }
 
     #[test]
-    fn an_http_only_consent_approval_returns_the_token_only_to_the_operator() {
+    fn a_keyless_consent_approval_delivers_the_token_to_the_requestor_once() {
         let mut registry = PairingRegistry::new();
         let id = registry
             .begin_request("hermes-http", None, "192.168.0.50:1", NOW)
             .unwrap();
-        assert!(!registry.pending_requests()[0].client_has_key);
+        assert!(!registry.pending_requests().is_empty());
         assert_eq!(
             registry.poll_request(&id, NOW).unwrap().unwrap().status,
             PairRequestStatus::AwaitingConsent
         );
 
-        let approval = registry
+        let approved = registry
             .approve_request(&id, NOW)
             .unwrap()
             .unwrap_or_else(|| panic!("HTTP-only request should be approved"));
-        assert_eq!(approval.agent.name, "hermes-http");
-        let token = approval.token.expect("operator gets the one-time token");
-        assert!(registry.authenticate(&token).is_some());
+        assert_eq!(approved.name, "hermes-http");
 
+        // The requestor collects the credential itself, exactly once.
         let poll = registry.poll_request(&id, NOW).unwrap().unwrap();
-        assert_eq!(poll.status, PairRequestStatus::OperatorApproved);
-        assert_eq!(poll.agent_id.as_deref(), Some(approval.agent.id.as_str()));
-        // PairPoll has no credential field; the anonymous endpoint can only say
-        // that the operator approved, never hand the token to the requester.
-        assert!(poll.sealed_credential.is_none());
+        assert_eq!(poll.status, PairRequestStatus::Delivered);
+        assert_eq!(poll.agent_id.as_deref(), Some(approved.id.as_str()));
+        let token = poll.credential.expect("the requestor gets the token");
+        assert!(registry.authenticate(&token).is_some());
+        assert!(registry
+            .poll_request(&id, NOW)
+            .unwrap()
+            .unwrap()
+            .credential
+            .is_none());
     }
 
     #[test]

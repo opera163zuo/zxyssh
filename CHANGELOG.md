@@ -26,13 +26,13 @@ the same row has approve and reject buttons. Headless, `zxyssh mcp requests list
 and `requests approve <id>` do the same job. Because this CLI makes an ephemeral
 key, approval seals the credential to it and its poll takes the result once.
 
-A URL-only Agent can send `POST /pair/request {"name"}` without a key. Approval
-still creates the credential only at the button press, but the token is returned
-only to the local desktop/CLI for the operator to put in the Agent's managed
-secret store; `/pair/status` says `approved` and never carries that token. This
-lets an Agent that cannot receive secrets in chat request access by URL alone.
-A request nobody answers expires after 900 seconds having issued nothing, and
-refusing one leaves nothing to revoke.
+A URL-only Agent sends `POST /pair/request {"name"}` with no key. Approval still
+creates the credential only at the button press, and now the Agent that asked is
+the Agent that receives it: `/pair/status` answers `delivered` with the bearer
+token in it, once, so **nothing is shown to the operator to copy**. A second poll
+on the same request id carries no credential. A request nobody answers expires
+after 900 seconds having issued nothing, and refusing one leaves nothing to
+revoke.
 
 The code door is unchanged and still the default way in: a correct six-digit
 code pairs immediately, with no approval step, because an unattended host cannot

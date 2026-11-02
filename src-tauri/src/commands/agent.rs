@@ -129,7 +129,7 @@ pub fn set_agent_guard_config(
 /// two views of one list.
 use crate::mcp::lan_status::{self, LanListenerStatus};
 use crate::mcp::pairing::{
-    AgentSummary, IssuedAgent, PairApproval, PairRequestSummary, PairingError, PairingRegistry,
+    AgentSummary, IssuedAgent, PairRequestSummary, PairingError, PairingRegistry,
 };
 
 fn registry(db: &State<'_, Arc<Database>>) -> Result<PairingRegistry, String> {
@@ -202,12 +202,13 @@ pub fn mcp_pair_requests_list(
     Ok(registry.pending_requests())
 }
 
-/// Approve a codeless request: this is the moment its credential is created.
+/// Approve a codeless request: this is the moment its credential is created, and
+/// the requestor collects it by polling `/pair/status`.
 #[tauri::command]
 pub fn mcp_pair_request_approve(
     db: State<'_, Arc<Database>>,
     request_id: String,
-) -> Result<Option<PairApproval>, String> {
+) -> Result<Option<AgentSummary>, String> {
     let mut registry = registry(&db)?;
     let now = chrono::Utc::now().timestamp();
     registry

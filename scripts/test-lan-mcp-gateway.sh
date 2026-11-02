@@ -163,25 +163,30 @@ XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | grep -q smoke-consent \
 CONSENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-consent/{print $1}')
 XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${CONSENT_ID:0:8}" >/dev/null
 
-# A URL-only Agent cannot take a token through the chat. It polls for approval;
-# the local operator gets the one-time token, while HTTP status never does.
+# A URL-only Agent never sees a token in chat: it asks, a human clicks, and the
+# credential comes back to the Agent's own poll — exactly once.
 HTTP_ONLY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/request" \
   -H 'Content-Type: application/json' -d '{"name":"smoke-http-only"}')
 expect "HTTP-only request does not need a client key" \
   "$(printf '%s' "$HTTP_ONLY" | json status)" "awaiting_consent"
 HTTP_REQ_ID=$(printf '%s' "$HTTP_ONLY" | json requestId)
-HTTP_APPROVAL=$(XDG_DATA_HOME="$LB" "$BIN" mcp requests approve "$HTTP_REQ_ID") \
+XDG_DATA_HOME="$LB" "$BIN" mcp requests approve "$HTTP_REQ_ID" >/dev/null \
   || fail "could not approve HTTP-only request $HTTP_REQ_ID"
-HTTP_TOKEN=$(printf '%s\n' "$HTTP_APPROVAL" | sed -n 's/^\(vsh_[A-Za-z0-9_-]*\)$/\1/p' | head -1)
-[ "${#HTTP_TOKEN}" = "47" ] || fail "operator approval did not show its one-time token"
 HTTP_POLL=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" \
   -H 'Content-Type: application/json' -d "{\"requestId\":\"$HTTP_REQ_ID\"}")
-expect "HTTP-only poll reports approval" "$(printf '%s' "$HTTP_POLL" | json status)" "approved"
-printf '%s' "$HTTP_POLL" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "token" not in d and "sealedToken" not in d' \
-  && ok "HTTP-only poll never exposes the token" \
-  || fail "HTTP-only poll exposed credential material"
-expect "operator-held HTTP-only token authenticates" \
+expect "the requestor collects its own credential" \
+  "$(printf '%s' "$HTTP_POLL" | json status)" "delivered"
+HTTP_TOKEN=$(printf '%s' "$HTTP_POLL" | json token)
+[ "${#HTTP_TOKEN}" = "47" ] || fail "the approved pairing carried no token: ${HTTP_TOKEN:0:6}…"
+expect "the delivered token authenticates" \
   "$(rpc "127.0.0.1:$PORT" "$HTTP_TOKEN" '{"jsonrpc":"2.0","id":7,"method":"tools/list"}' | json result tools 0 name)" "server_list"
+grep -qF "$HTTP_TOKEN" "$LB/serve.log" && fail "the service log contains the consent token" \
+  || ok "the service log never recorded the consent token"
+HTTP_REPLAY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" \
+  -H 'Content-Type: application/json' -d "{\"requestId\":\"$HTTP_REQ_ID\"}")
+printf '%s' "$HTTP_REPLAY" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "token" not in d and "sealedToken" not in d' \
+  && ok "the credential is not handed out twice" \
+  || fail "a replayed poll still received a credential"
 HTTP_AGENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-http-only/{print $1}')
 XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${HTTP_AGENT_ID:0:8}" >/dev/null
 

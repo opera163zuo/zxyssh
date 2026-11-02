@@ -201,9 +201,7 @@ export function AgentPairingPanel() {
                     })}
                   </div>
                   <div className="mt-1 text-xs text-tokyo-comment">
-                    {request.clientHasKey
-                      ? t('settings.pairingRequestSealed')
-                      : t('settings.pairingRequestManualHandoff')}
+                    {t('settings.pairingRequestSelfDelivery')}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">

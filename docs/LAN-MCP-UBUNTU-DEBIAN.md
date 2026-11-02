@@ -109,23 +109,25 @@ any other — can open the pairing itself and wait for a human:
 ```
 
 The reference CLI generates an ephemeral key and polls until approved; the
-credential is returned sealed to that CLI. For an HTTP-only Agent, omit the key:
+credential is returned sealed to that CLI. An HTTP-only Agent can do the same
+with no key and no CLI at all:
 
 ```text
 POST /pair/request {"name":"Hermes"}
      -> 202 {"requestId":"...","status":"awaiting_consent"}
 POST /pair/status {"requestId":"..."}
-     -> 200 {"status":"approved","agentId":"...","name":"Hermes"}
+     -> 200 {"status":"awaiting_consent"}                     (keep polling)
+     -> 200 {"status":"delivered","agentId":"...","name":"Hermes","token":"vsh_…","tokenType":"Bearer"}
 ```
 
-The desktop shows the request in the Agent list. Approval creates the credential,
-but the unauthenticated poll only reports `approved`, never returns the token.
-The one-time token appears only in the local desktop; enter it into the remote
-Agent's managed secret store, never into chat. Until the operator provisions that
-credential, the Agent cannot make authenticated MCP calls. The headless `zxyssh mcp requests approve <id>` command also prints the token
-once for the operator to put in the managed secret store; run it in a private
-operator terminal, never through the Agent's chat/tool transcript. An unanswered
-request expires after 900 seconds; refusing it issues nothing.
+The desktop shows the request in the Agent list with its source address and
+countdown; approval is the moment the credential comes into existence. The
+requestor collects that credential from its own poll, exactly once, so there is
+nothing for the operator to copy and nothing to paste into a chat. A second poll
+on the same `requestId` answers `delivered` with no credential in it. An
+unanswered request expires after 900 seconds having issued nothing, and refusing
+one leaves nothing to revoke. Headless, `zxyssh mcp requests list` and
+`requests approve <id>` make the same decision as the desktop button.
 
 A connector that only has the service URL can first fetch `/.well-known/zxyssh-mcp.json`. It is public metadata — no token, no OAuth exchange — and describes the Streamable HTTP `/mcp` endpoint, static Bearer authentication and both pairing doors. A 401 response also points to this document and `/pair/request`.
 
@@ -171,7 +173,7 @@ bash scripts/test-lan-mcp-gateway.sh                  # free port, detected IPv4
 bash scripts/test-lan-mcp-gateway.sh 192.168.1.20     # name the interface address
 ```
 
-It asserts 18 checks in four groups:
+It asserts 29 checks in four groups:
 
 1. **Boot guard** — a non-loopback bind with no paired Agent must refuse to start.
 2. **Transport and auth** — health, `401` with no token and with a forged one,
