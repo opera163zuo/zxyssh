@@ -11,6 +11,13 @@ vi.mock('react-i18next', () => ({
 const defaults = {
   code: null,
   agents: [] as { id: string; name: string; revoked: boolean }[],
+  requests: [] as {
+    id: string;
+    agentName: string;
+    peer: string;
+    createdAt: number;
+    expiresAt: number;
+  }[],
   lanStatus: null,
   issuedToken: null,
   pairedJustNow: null,
@@ -22,9 +29,13 @@ beforeEach(() => {
   useMcpPairingStore.setState({
     ...defaults,
     refresh: vi.fn(async () => {}),
+    refreshRequests: vi.fn(async () => {}),
     createCode: vi.fn(async () => {}),
     checkCode: vi.fn(async () => {}),
+    approveRequest: vi.fn(async () => {}),
+    rejectRequest: vi.fn(async () => {}),
     revoke: vi.fn(async () => {}),
+    forget: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     rotate: vi.fn(async () => {}),
     dismissIssuedToken: vi.fn(),
@@ -66,7 +77,30 @@ it('rerolls a live code on click and announces an Agent that just paired', () =>
   expect(screen.getByText('settings.pairingJustPaired')).toBeInTheDocument();
 });
 
-it('lets the operator rename, rotate and revoke a live Agent but not a revoked one', () => {
+it('shows a codeless request with its address and offers approve or reject', () => {
+  useMcpPairingStore.setState({
+    ...defaults,
+    requests: [
+      {
+        id: 'r1',
+        agentName: 'opencode',
+        peer: '192.168.0.7:51234',
+        createdAt: 0,
+        expiresAt: Math.floor(Date.now() / 1000) + 300,
+      },
+    ],
+  });
+  render(<AgentPairingPanel />);
+  expect(screen.getByText('opencode')).toBeInTheDocument();
+  expect(screen.getByText('settings.pairingRequestSelfDelivery')).toBeInTheDocument();
+  expect(screen.getByText(/192\.168\.0\.7:51234/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRequestApprove' }));
+  expect(useMcpPairingStore.getState().approveRequest).toHaveBeenCalledWith('r1');
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRequestReject' }));
+  expect(useMcpPairingStore.getState().rejectRequest).toHaveBeenCalledWith('r1');
+});
+
+it('lets the operator rename and rotate a live Agent, and delete only a revoked one', () => {
   useMcpPairingStore.setState({
     agents: [
       { id: 'aaaa1111', name: 'hermes-office', revoked: false },
@@ -74,15 +108,18 @@ it('lets the operator rename, rotate and revoke a live Agent but not a revoked o
     ],
   });
   render(<AgentPairingPanel />);
-  expect(screen.getByText('settings.pairingRevoke')).toBeInTheDocument();
-  fireEvent.click(screen.getByText('settings.pairingRotate'));
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRotate' }));
   expect(useMcpPairingStore.getState().rotate).toHaveBeenCalledWith('aaaa1111');
-  fireEvent.click(screen.getByText('settings.pairingRename'));
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingRename' }));
   fireEvent.change(screen.getByDisplayValue('hermes-office'), { target: { value: 'hermes-desk' } });
   fireEvent.submit(screen.getByDisplayValue('hermes-desk').closest('form') as HTMLElement);
   expect(useMcpPairingStore.getState().rename).toHaveBeenCalledWith('aaaa1111', 'hermes-desk');
-  // The revoked row offers no actions at all.
-  expect(screen.getAllByText('settings.pairingRevoke')).toHaveLength(1);
+  // Actions are icon-only now, so the accessible name is the tooltip text: a
+  // live row offers no delete, and exactly one delete exists for the revoked row.
+  expect(screen.getAllByRole('button', { name: 'settings.pairingRevoke' })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'settings.pairingForget' })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'settings.pairingForget' }));
+  expect(useMcpPairingStore.getState().forget).toHaveBeenCalledWith('bbbb2222');
 });
 
 it('shows a rotated credential until it is dismissed', () => {

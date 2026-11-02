@@ -44,6 +44,17 @@ pub struct PairPollRequest {
     request_id: String,
 }
 
+/// Body of a codeless pairing request. The key is optional: with one, approval
+/// seals the credential to that agent; without one, approval hands the bearer
+/// token straight back to the requestor.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConsentRequest {
+    name: String,
+    #[serde(default, alias = "clientPublicKey")]
+    client_public_key: Option<String>,
+}
+
 /// Reject pairing floods before they reach a code's own attempt counter.
 /// Pairing codes are six digits, so this is the outer bound on guessing.
 #[derive(Default)]
@@ -109,7 +120,18 @@ fn reject(status: StatusCode, message: &str) -> Response {
 }
 
 fn unauthorized() -> Response {
-    let mut response = reject(StatusCode::UNAUTHORIZED, "Unauthorized");
+    let mut response = no_store(
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "unauthorized",
+                "message": "zxySSH uses static Bearer authentication; read /.well-known/zxyssh-mcp.json for onboarding",
+                "mcpEndpoint": "/mcp",
+                "consentEndpoint": "/pair/request",
+            })),
+        )
+            .into_response(),
+    );
     response
         .headers_mut()
         .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
@@ -120,6 +142,35 @@ fn lock_registry(
     registry: &Arc<Mutex<PairingRegistry>>,
 ) -> Result<MutexGuard<'_, PairingRegistry>, ()> {
     registry.lock().map_err(|_| ())
+}
+
+/// Public onboarding metadata. It describes how to obtain a credential but
+/// never contains one, so a URL-only MCP client can discover the two pairing
+/// doors without being granted any access.
+pub async fn handle_onboarding() -> Response {
+    no_store(
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "service": "zxyssh",
+                "transport": "streamable-http",
+                "mcpEndpoint": "/mcp",
+                "authentication": {
+                    "type": "bearer",
+                    "oauth": false,
+                },
+                "pairing": {
+                    "codeEndpoint": "/pair",
+                    "consentEndpoint": "/pair/request",
+                    "statusEndpoint": "/pair/status",
+                    "operatorApproval": true,
+                    "clientPublicKeyOptional": true,
+                    "tokenReturnedByStatus": true,
+                },
+            })),
+        )
+            .into_response(),
+    )
 }
 
 pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Response {
@@ -157,9 +208,9 @@ pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Res
         Ok(registry) => registry,
         Err(_) => return registry_unavailable(),
     };
-    // Codes are minted by `zxyssh mcp pair-code` and approved in the desktop UI,
-    // both separate processes, so read the persisted registry before consuming
-    // one and before deciding whether a request is already queued.
+    // Codes are minted by `zxyssh mcp pair-code` and by the desktop UI, which are
+    // separate processes from this listener, so read the persisted registry
+    // before consuming one and before deciding whether a request is queued.
     if registry.reload().is_err() {
         return registry_unavailable();
     }
@@ -206,8 +257,78 @@ pub async fn handle_pair(State(state): State<McpState>, request: Request) -> Res
     }
 }
 
+/// Start a pairing with no code. The request waits on the operator's approve
+/// button — in the desktop or via `zxyssh mcp requests approve` — and no
+/// credential exists until it is pressed. This is the path for an Agent that
+/// must not be handed a secret through its own chat log.
+pub async fn handle_pair_request(State(state): State<McpState>, request: Request) -> Response {
+    let Some(registry) = &state.pairing_registry else {
+        return reject(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Pairing registry unavailable",
+        );
+    };
+
+    let peer = peer_key(&request);
+    let allowed = state
+        .pairing_limiter
+        .lock()
+        .map(|mut limiter| limiter.allow(&peer, now_seconds()))
+        .unwrap_or(false);
+    if !allowed {
+        return reject(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many pairing attempts, retry shortly",
+        );
+    }
+
+    let body = match Json::<ConsentRequest>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            return reject(
+                StatusCode::BAD_REQUEST,
+                "Expected a JSON body with name and optional clientPublicKey",
+            )
+        }
+    };
+
+    let mut registry = match lock_registry(registry) {
+        Ok(registry) => registry,
+        Err(_) => return registry_unavailable(),
+    };
+    // The operator may approve from another process, so read the persisted
+    // registry before queueing and before counting what is already waiting.
+    if registry.reload().is_err() {
+        return registry_unavailable();
+    }
+    let now = chrono::Utc::now().timestamp();
+    match registry.begin_request(&body.name, body.client_public_key.as_deref(), &peer, now) {
+        Ok(request_id) => no_store(
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "requestId": request_id,
+                    "status": "awaiting_consent",
+                    "pollPath": "/pair/status",
+                })),
+            )
+                .into_response(),
+        ),
+        Err(PairingError::InvalidName) => reject(StatusCode::BAD_REQUEST, "Agent name is required"),
+        Err(PairingError::InvalidClientKey) => reject(
+            StatusCode::BAD_REQUEST,
+            "clientPublicKey must be a base64url-encoded 32-byte X25519 key when provided",
+        ),
+        Err(PairingError::TooManyRequests) => reject(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many pairing requests are already waiting for the operator",
+        ),
+        Err(_) => registry_unavailable(),
+    }
+}
+
 /// Delivery endpoint for a queued pairing request. It answers nothing about
-/// other requests, and the sealed credential is returned only once.
+/// other requests, and the credential is returned only once.
 pub async fn handle_pair_status(State(state): State<McpState>, request: Request) -> Response {
     let Some(registry) = &state.pairing_registry else {
         return reject(
@@ -258,7 +379,12 @@ pub async fn handle_pair_status(State(state): State<McpState>, request: Request)
             body["agentId"] = serde_json::Value::String(id);
             body["name"] = serde_json::Value::String(name);
         }
-        if let (Some(public_key), Some(sealed)) = (poll.server_public_key, poll.sealed_credential) {
+        if let Some(token) = poll.credential {
+            body["token"] = serde_json::Value::String(token);
+            body["tokenType"] = serde_json::Value::String("Bearer".to_string());
+        } else if let (Some(public_key), Some(sealed)) =
+            (poll.server_public_key, poll.sealed_credential)
+        {
             body["serverPublicKey"] = serde_json::Value::String(public_key);
             body["sealedToken"] = serde_json::Value::String(sealed);
             body["tokenType"] = serde_json::Value::String("Bearer-sealed".to_string());
@@ -272,6 +398,11 @@ fn status_name(status: PairRequestStatus) -> &'static str {
         // The wire name stays `awaiting_approval` so Agents written against 2.1.0
         // keep parsing it; the state now means "sealing, poll again".
         PairRequestStatus::AwaitingDelivery => "awaiting_approval",
+        PairRequestStatus::AwaitingConsent => "awaiting_consent",
+        // Never served: `poll_request` releases a keyless credential as
+        // `delivered`. The arm exists because the state can be persisted.
+        PairRequestStatus::OperatorApproved => "approved",
+        PairRequestStatus::Refused => "refused",
         PairRequestStatus::Approved => "approved",
         PairRequestStatus::Delivered => "delivered",
         PairRequestStatus::Expired => "expired",
@@ -293,7 +424,10 @@ pub async fn require_paired_agent(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    if matches!(path.as_str(), "/pair" | "/pair/status" | "/health") {
+    if matches!(
+        path.as_str(),
+        "/pair" | "/pair/request" | "/pair/status" | "/health" | "/.well-known/zxyssh-mcp.json"
+    ) {
         return no_store(next.run(request).await);
     }
 

@@ -28,17 +28,6 @@
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
   }
 
-  :root[data-theme='ink-black'],
-  :root[data-theme='violet-black'],
-  :root[data-theme='cyan-black'] {
-    --tokyo-red: #ff7b86;
-    --tokyo-green: #63d9a0;
-    --tokyo-yellow: #e7b75f;
-    --tokyo-magenta: #d8a1f0;
-    --tokyo-cyan: #55d6d8;
-    --tokyo-orange: #ff9c68;
-  }
-
   @supports (height: 100dvh) {
     :root {
       --app-viewport-height: 100dvh;

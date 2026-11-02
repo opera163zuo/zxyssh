@@ -55,14 +55,14 @@ SessionManager.create_with_credentials()
 - SSH host-key verification is **TOFU, enforced server-side** in the connect flow: `probe_host_key` → user approval → connect; a changed host key hard-fails before authentication
 - Terminal output events are **base64-encoded and coalesced** — the frontend must base64-decode event payloads before writing to xterm
 - The service↔GUI IPC directory is per-user **0700**, with a private socket. GUI startup owns the service when available or attaches to an existing one. Route each operation to its session's owner.
-- MCP transport is plain HTTP bearer tokens, accepted for a trusted internal network by explicit operator opt-in. Pairing is a single-use six-digit code (300 s TTL, five-attempt limit) and **a correct code is the whole handshake**: `POST /pair {"name","code"}` returns the credential immediately; there is no approval step and no queue. Tokens are stored only as SHA-256 hashes, and revocation/rotation take effect on the next request. A client that sends `clientPublicKey` gets the credential sealed instead of in the clear: the service completes an ephemeral X25519 agreement (`src-tauri/src/mcp/pair_crypto.rs`) as soon as the code is spent, and the Agent fetches it once from `POST /pair/status`. That wire handshake still answers `202 awaiting_approval` for compatibility with Agents written against 2.1.0, but the state means "sealed, poll for it" — nothing waits for a human. The pairing code itself always crosses a plain-HTTP wire in the clear, so sealing protects the credential, not the code. A LAN listener refuses wildcard addresses and will not start with zero paired Agents; it publishes `mcp-lan-status.json` (0600, no secrets) for the desktop to display.
+- MCP transport is plain HTTP bearer tokens, accepted for a trusted internal network by explicit operator opt-in. Pairing has **two doors**. The code door: a single-use six-digit code (300 s TTL, five-attempt limit) is the whole handshake — `POST /pair {"name","code"}` returns the credential immediately, with no approval step and no queue. The consent door, for an Agent that must not be handed a code through its own chat log: `POST /pair/request {"name"}` or `{"name","clientPublicKey"}` creates nothing but a waiting entry, and the credential is minted only when an operator approves it (desktop, or `zxyssh mcp requests approve`); refusing or ignoring a request leaves nothing to revoke, and unapproved requests expire after 900 s. With a client key the credential is sealed for the Agent to poll; without a key `/pair/status` hands the bearer token itself to the requestor, once, so the operator never has to carry it. Either way the Agent that asked is the Agent that receives it. Tokens are stored only as SHA-256 hashes, and revocation/rotation take effect on the next request. On the code door, a client that sends `clientPublicKey` gets the credential sealed instead of in the clear: the service completes an ephemeral X25519 agreement (`src-tauri/src/mcp/pair_crypto.rs`) as soon as the code is spent, and the Agent fetches it once from `POST /pair/status`. That wire handshake still answers `202 awaiting_approval` for compatibility with Agents written against 2.1.0, but the state means "sealed, poll for it" — nothing waits for a human. The consent door answers `202 awaiting_consent`, which does mean a human. The pairing code itself always crosses a plain-HTTP wire in the clear, so sealing protects the credential, not the code. A LAN listener refuses wildcard addresses and will not start with zero paired Agents; it publishes `mcp-lan-status.json` (0600, no secrets) for the desktop to display, and `zxyssh mcp pair` reads that file to find the listener when `--endpoint` is omitted. It also exposes `/.well-known/zxyssh-mcp.json` with public transport, Bearer-auth, and pairing-door metadata; it contains no credential.
 - Paired Agents are limited by a tool allowlist plus session ownership, not only by prompt policy. `is_agent_tool`/`get_agent_tool_definitions` in `src-tauri/src/mcp/tools.rs` and the paired-Agent branch in `handle_tools_call` must stay in sync; `session_kill` rejects the batch form because ownership of one session must not grant authority over all of them.
 - Sudo is injected by the service only when the site has both a stored sudo credential and an exact command in `sudo_policies`; anything else fails closed.
 - Tests must use injected temporary databases/keys. Never call production data initializers in test helpers or run all ignored tests against user configuration.
 - Credentials must never enter Debug/activity output. Preserve exact secret bytes and atomic metadata/credential updates.
 
-### Theme System
-- CSS variables set on `document.documentElement` from `settingsStore`
+### Fixed Theme
+- Paper White CSS variables are defined statically in `src/styles.css`.
 - Tailwind classes: `bg-tokyo-bg`, `text-tokyo-fg`, `border-tokyo-bg-hl`, etc.
 - **NEVER** use hardcoded hex colors — always use `tokyo-*` Tailwind utilities
 
@@ -122,7 +122,6 @@ Stores in `src/stores/`:
 
 | Store | Purpose |
 |-------|---------|
-| `agentApprovalStore` | Approvals for dangerous AI-agent commands (Agent Gateway) |
 | `agentActivityStore` | Durable operation history, incremental recovery and pagination |
 | `fileWorkspaceStore` | Open local/SFTP files + viewer state |
 | `fingerprintStore` | SSH host key verification |
@@ -133,12 +132,12 @@ Stores in `src/stores/`:
 | `runtimeCapabilitiesStore` | Runtime capability flags (platform, local shell, agent gateway, updater) |
 | `serverStore` | Server/group CRUD |
 | `sessionStore` | SSH session lifecycle |
-| `settingsStore` | App settings + themes |
+| `settingsStore` | SFTP 上传忽略规则与只读 Gateway/版本状态 |
 | `updateStore` | App update check/download state |
 
 ## Tauri Commands
 
-Organized by module under `src-tauri/src/commands/`: `session`, `server`, `sftp`, `fingerprint`, `local_shell`, `dialog`, `settings`, `plugin`, `local_files`, `workspace_window`, `agent`, `app`, `platform`.
+Organized by module under `src-tauri/src/commands/`: `session`, `server`, `sftp`, `fingerprint`, `local_shell`, `dialog`, `plugin`, `local_files`, `workspace_window`, `agent`, `app`, `platform`.
 
 All registered in `src-tauri/src/lib.rs` → `invoke_handler`. The `snippet`, `history`, `tunnel`, `dbconn`, `coding_agent`, `logging` (session recording), `cloud_sync` and `install` (the Settings → Skills surface) command modules were removed with their UI; do not re-register them to fix a missing frontend call.
 

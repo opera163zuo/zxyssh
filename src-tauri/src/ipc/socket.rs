@@ -969,7 +969,6 @@ impl IpcServer {
         };
         let mut input_guard = None;
         let mut checkpoint = None;
-        let mut denied = None;
         let mut descriptions: Vec<(String, Option<String>, String)> = Vec::new();
         match &message {
             IpcMessage::SendInput { session_id, data } => {
@@ -988,13 +987,6 @@ impl IpcServer {
                 );
                 checkpoint = Some(saved);
                 if !user_input {
-                    let config = crate::mcp::GuardConfig::from_stored_json(
-                        database
-                            .get_setting(crate::mcp::guard::GUARD_CONFIG_KEY)
-                            .ok()
-                            .flatten()
-                            .as_deref(),
-                    );
                     if commands.is_empty() && !data.is_empty() {
                         descriptions.push(("cli.input_pending".into(), Some(session_id.clone()),
                             if redact { "[sensitive input omitted]".into() } else {
@@ -1002,13 +994,6 @@ impl IpcServer {
                             }));
                     }
                     for command in commands {
-                        if config.enabled
-                            && (!command.is_verifiable
-                                || crate::mcp::guard::classify_command(&command.command, &config)
-                                    .requires_approval)
-                        {
-                            denied = Some("Terminal command requires approval in the zxySSH Agent Gateway; no input was sent".to_string());
-                        }
                         descriptions.push((
                             "cli.input".into(),
                             Some(session_id.clone()),
@@ -1077,17 +1062,13 @@ impl IpcServer {
                 return IpcMessage::Error { message: format!("Operation was not executed because its audit record could not be saved: {error}") };
             }
         }
-        let response = if let Some(message) = denied {
-            IpcMessage::Error { message }
-        } else {
-            Self::dispatch_message(
-                message,
-                database.clone(),
-                session_manager.clone(),
-                sftp_contexts,
-                rt,
-            )
-        };
+        let response = Self::dispatch_message(
+            message,
+            database.clone(),
+            session_manager.clone(),
+            sftp_contexts,
+            rt,
+        );
         if matches!(&response, IpcMessage::Error { .. }) {
             if let Some(saved) = checkpoint {
                 rt.block_on(session_manager.agent_input_tracker.restore(saved));
@@ -1400,34 +1381,6 @@ impl IpcServer {
                 command,
                 stdin,
             } => {
-                // IPC callers have no approval UI. Apply the same command-risk
-                // classification the MCP agent gateway uses and fail closed on
-                // risky commands instead of executing them unattended.
-                let guard_cfg = {
-                    let stored = database
-                        .get_setting(crate::mcp::guard::GUARD_CONFIG_KEY)
-                        .ok()
-                        .flatten();
-                    crate::mcp::guard::GuardConfig::from_stored_json(stored.as_deref())
-                };
-                if guard_cfg.enabled && guard_cfg.require_for_exec {
-                    let decision = crate::mcp::guard::classify_command(&command, &guard_cfg);
-                    if decision.requires_approval {
-                        log::warn!(
-                            "[IPC] Blocked ExecCommand on session {} (requires approval): {}",
-                            session_id,
-                            decision.reasons.join("; ")
-                        );
-                        return IpcMessage::Error {
-                            message: format!(
-                                "Command requires user approval, but no approval UI is \
-                                 available over IPC. Blocked for safety: {}",
-                                decision.reasons.join("; ")
-                            ),
-                        };
-                    }
-                }
-
                 match rt.block_on(async {
                     let session = session_manager
                         .get(&session_id)

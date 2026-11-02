@@ -19,16 +19,38 @@ An operator mints a single-use six-digit code, either in the desktop app (Settin
 zxyssh mcp pair-code
 ```
 
-A correct code pairs immediately; there is no approval step:
+A correct code pairs immediately; nothing else is asked for:
 
 ```text
 POST /pair {"name":"<agent name>","code":"<six digits>"}
      -> 200 {"token":"..."}
 ```
 
-`zxyssh mcp pair --name <name>` is the reference client: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once. When run on the service host, it discovers the live listener address from zxySSH's local service status file; pass `--endpoint <url>` to pair from another machine or override that address.
+**Never ask the operator to type a pairing code or a bearer token into the chat, and never accept one that way.** Both are credentials; a transcript is a log like any other.
 
-A client that offers `clientPublicKey` gets that credential sealed rather than printed in the response, which is what keeps it safe on a plain-HTTP listener:
+An Agent that cannot take a code through its own chat log opens the pairing itself and waits for a human:
+
+```bash
+zxyssh mcp pair --name <agent name> --no-code
+```
+
+That posts `POST /pair/request {"name"}`, which creates nothing, and waits for an operator to approve it — in the desktop under Settings → **Agent access and pairing**, or headless with `zxyssh mcp requests list` then `requests approve <id>`. The credential comes back to this client's own poll, so the operator never handles it. Use this only when command output is not exposed in a shared chat transcript; the CLI prints the credential once so it can be placed into the local Agent configuration.
+
+An Agent that can only reach the HTTP endpoint does the same thing directly:
+
+```text
+POST /pair/request {"name":"Hermes"}
+     -> 202 {"requestId":"...","status":"awaiting_consent","pollPath":"/pair/status"}
+POST /pair/status {"requestId":"..."}
+     -> 200 {"status":"awaiting_consent"}  (keep polling)
+     -> 200 {"status":"delivered","agentId":"...","name":"Hermes","token":"vsh_…","tokenType":"Bearer"}
+```
+
+Write that token into the Agent's own configuration as it arrives; do not repeat it back into the conversation. `awaiting_consent` means a human has not decided yet — keep polling, do not re-request. An unanswered request expires after 900 seconds having issued nothing, `refused` means stop, and a second poll of the same `requestId` returns no credential.
+
+`zxyssh mcp pair --name <name>` is the reference client for the code path: it reads the code from stdin, so the code never lands in arguments or shell history, and it prints the credential once. When run on the service host, it discovers the live listener address from zxySSH's local service status file; pass `--endpoint <url>` to pair from another machine or override that address.
+
+A client that offers a `clientPublicKey` on either door gets the credential sealed to that key instead of in the clear:
 
 ```text
 POST /pair {"name":"...","code":"...","clientPublicKey":"<base64url X25519>"}

@@ -171,6 +171,27 @@ async fn unauthenticated_mcp_requests_are_rejected() {
 }
 
 #[tokio::test]
+async fn onboarding_metadata_is_public_and_contains_no_credential() {
+    let service = TestService::start().await;
+    let response = reqwest::Client::new()
+        .get(format!("{}/.well-known/zxyssh-mcp.json", service.base_url))
+        .send()
+        .await
+        .expect("onboarding metadata");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = response.json().await.expect("metadata body");
+    assert_eq!(body["service"], "zxyssh");
+    assert_eq!(body["transport"], "streamable-http");
+    assert_eq!(body["mcpEndpoint"], "/mcp");
+    assert_eq!(body["authentication"]["type"], "bearer");
+    assert_eq!(body["authentication"]["oauth"], false);
+    assert_eq!(body["pairing"]["consentEndpoint"], "/pair/request");
+    assert_eq!(body["pairing"]["tokenReturnedByStatus"], true);
+    assert!(serde_json::to_string(&body).unwrap().find("vsh_").is_none());
+    service.shutdown();
+}
+
+#[tokio::test]
 async fn health_stays_public_and_mcp_needs_a_paired_agent() {
     let service = TestService::start().await;
     let health = reqwest::Client::new()
@@ -449,6 +470,118 @@ async fn a_sealed_credential_is_delivered_exactly_once() {
     assert_eq!(second["status"], "delivered");
     assert!(
         second.get("sealedToken").is_none(),
+        "the credential must not be handed out twice"
+    );
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn a_codeless_request_waits_for_the_operator_then_delivers_sealed() {
+    use crate::mcp::pair_crypto::{self, public_key_b64};
+
+    let service = TestService::start().await;
+    let key_pair = pair_crypto::ephemeral_private_key().expect("client key");
+    let client_public = public_key_b64(&key_pair).expect("client public key");
+    let response = reqwest::Client::new()
+        .post(format!("{}/pair/request", service.base_url))
+        .json(&json!({ "name": "hermes-consent", "clientPublicKey": client_public }))
+        .send()
+        .await
+        .expect("consent request");
+    assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+    let body: Value = response.json().await.expect("body");
+    assert_eq!(body["status"], "awaiting_consent");
+    let request_id = body["requestId"].as_str().expect("requestId").to_string();
+
+    // Nothing has been issued: no Agent exists, and the poll says so without
+    // carrying a credential.
+    assert_eq!(service.registry.lock().unwrap().active_agent_count(), 0);
+    let (status, waiting) = service.poll(&request_id).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(waiting["status"], "awaiting_consent");
+    assert!(waiting.get("sealedToken").is_none());
+
+    // The operator approves, and only now is a credential created.
+    let now = chrono::Utc::now().timestamp();
+    let summary = service
+        .registry
+        .lock()
+        .unwrap()
+        .approve_request(&request_id, now)
+        .expect("approve")
+        .expect("approved request");
+    assert_eq!(summary.name, "hermes-consent");
+
+    let text = service.poll_text(&request_id).await;
+    assert!(
+        !text.contains("vsh_"),
+        "the credential must not appear in the clear"
+    );
+    let delivered: Value = serde_json::from_str(&text).expect("poll body");
+    assert_eq!(delivered["status"], "delivered");
+    let token = pair_crypto::open_sealed(
+        key_pair,
+        delivered["serverPublicKey"]
+            .as_str()
+            .expect("serverPublicKey"),
+        &request_id,
+        delivered["sealedToken"].as_str().expect("sealedToken"),
+    )
+    .expect("open sealed credential");
+    assert!(token.starts_with("vsh_"));
+    assert_eq!(service.registry.lock().unwrap().active_agent_count(), 1);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn a_keyless_consent_approval_hands_the_token_to_the_requestor_once() {
+    let service = TestService::start().await;
+    let response = reqwest::Client::new()
+        .post(format!("{}/pair/request", service.base_url))
+        .json(&json!({ "name": "hermes-http-only" }))
+        .send()
+        .await
+        .expect("HTTP-only consent request");
+    assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+    let body: Value = response.json().await.expect("request body");
+    assert_eq!(body["status"], "awaiting_consent");
+    let request_id = body["requestId"].as_str().expect("requestId").to_string();
+
+    let (_, waiting) = service.poll(&request_id).await;
+    assert_eq!(waiting["status"], "awaiting_consent");
+    assert!(waiting.get("token").is_none());
+
+    let agent = service
+        .registry
+        .lock()
+        .unwrap()
+        .approve_request(&request_id, chrono::Utc::now().timestamp())
+        .expect("approve")
+        .expect("approved request");
+
+    let (status, delivered) = service.poll(&request_id).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(delivered["status"], "delivered");
+    assert_eq!(delivered["agentId"], agent.id);
+    assert_eq!(delivered["tokenType"], "Bearer");
+    let token = delivered["token"]
+        .as_str()
+        .expect("bearer token")
+        .to_string();
+    assert!(token.starts_with("vsh_"));
+
+    let ping = service
+        .rpc(
+            Some(&token),
+            json!({"jsonrpc":"2.0","id":1,"method":"ping","params":{}}),
+        )
+        .await;
+    assert_eq!(ping.status(), reqwest::StatusCode::OK);
+
+    let (_, replay) = service.poll(&request_id).await;
+    assert_eq!(replay["status"], "delivered");
+    assert!(
+        replay.get("token").is_none(),
         "the credential must not be handed out twice"
     );
     service.shutdown();

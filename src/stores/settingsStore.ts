@@ -15,54 +15,6 @@ export interface AgentGatewayStatus {
 }
 
 /**
- * Available font families for the terminal.
- */
-export type FontFamily = 'JetBrains Mono' | 'Fira Code' | 'Consolas' | 'Monaco';
-
-/**
- * Available cursor styles for the terminal.
- */
-export type CursorStyle = 'block' | 'underline' | 'bar';
-
-/**
- * Available color themes.
- */
-export type ThemeName = 'paper-white' | 'warm-ivory' | 'ink-black' | 'violet-black' | 'cyan-black';
-
-/** Whether the active theme is chosen manually or follows the OS appearance. */
-export type ThemeMode = 'manual' | 'system';
-
-/**
- * Terminal-related settings.
- */
-export interface TerminalSettings {
-  /** Font size in pixels (10-24) */
-  fontSize: number;
-  /** Font family for the terminal */
-  fontFamily: FontFamily;
-  /** Cursor style */
-  cursorStyle: CursorStyle;
-  /** Whether the cursor should blink */
-  cursorBlink: boolean;
-  /** Number of lines to keep in scrollback buffer (1000-100000) */
-  scrollbackLines: number;
-}
-
-/**
- * Appearance-related settings.
- */
-export interface AppearanceSettings {
-  /** Currently active color theme (resolved from the system preference when needed). */
-  theme: ThemeName;
-  /** Theme selection mode. */
-  themeMode: ThemeMode;
-  /** Theme used when the OS is in light mode. */
-  lightTheme: ThemeName;
-  /** Theme used when the OS is in dark mode. */
-  darkTheme: ThemeName;
-}
-
-/**
  * Global ignore rules for recursive SFTP uploads and syncs.
  */
 export interface UploadIgnoreConfig {
@@ -73,32 +25,8 @@ export interface UploadIgnoreConfig {
 }
 
 /**
- * All application settings combined.
+ * Default recursive upload ignore config.
  */
-export interface AppSettings {
-  terminal: TerminalSettings;
-  appearance: AppearanceSettings;
-}
-
-/**
- * Default settings values.
- */
-export const defaultSettings: AppSettings = {
-  terminal: {
-    fontSize: 14,
-    fontFamily: 'JetBrains Mono',
-    cursorStyle: 'block',
-    cursorBlink: true,
-    scrollbackLines: 10000,
-  },
-  appearance: {
-    theme: 'paper-white',
-    themeMode: 'manual',
-    lightTheme: 'paper-white',
-    darkTheme: 'violet-black',
-  },
-};
-
 export const defaultUploadIgnoreConfig: UploadIgnoreConfig = {
   excludedPaths: [
     'node_modules/',
@@ -126,9 +54,6 @@ export const defaultUploadIgnoreConfig: UploadIgnoreConfig = {
 // Store Interface
 // ============================================================================
 
-/**
- * Settings store state and actions.
- */
 interface SettingsStore {
   /** Built-in Agent Gateway status */
   gatewayStatus: AgentGatewayStatus | null;
@@ -137,9 +62,6 @@ interface SettingsStore {
   /** Whether app version lookup has completed */
   appVersionLoaded: boolean;
 
-  // App Settings state
-  /** Current application settings */
-  settings: AppSettings;
   /** Global recursive upload ignore config */
   uploadIgnoreConfig: UploadIgnoreConfig;
 
@@ -159,10 +81,6 @@ interface SettingsStore {
   // Settings actions
   /** Initialize settings from persistent storage */
   initializeSettings: () => Promise<void>;
-  /** Update terminal settings */
-  updateTerminalSettings: (settings: Partial<TerminalSettings>) => Promise<void>;
-  /** Update appearance settings */
-  updateAppearanceSettings: (settings: Partial<AppearanceSettings>) => Promise<void>;
   /** Update global recursive upload ignore config */
   updateUploadIgnoreConfig: (config: Partial<UploadIgnoreConfig>) => Promise<void>;
   /** Reset all settings to defaults */
@@ -172,107 +90,6 @@ interface SettingsStore {
 // ============================================================================
 // Persistence Helpers
 // ============================================================================
-
-const SETTINGS_KEY = 'zxyssh_settings';
-
-const LEGACY_THEME_MAP: Record<string, ThemeName> = {
-  'tokyo-night': 'violet-black',
-  dracula: 'violet-black',
-  'one-dark': 'ink-black',
-  nord: 'cyan-black',
-};
-
-const themeNames = new Set<ThemeName>([
-  'paper-white',
-  'warm-ivory',
-  'ink-black',
-  'violet-black',
-  'cyan-black',
-]);
-
-function normalizeAppearanceSettings(value: unknown): AppearanceSettings {
-  const raw = value && typeof value === 'object' ? value as Partial<AppearanceSettings> : {};
-  const normalizeTheme = (value: unknown, fallback: ThemeName): ThemeName => {
-    if (typeof value !== 'string') return fallback;
-    return themeNames.has(value as ThemeName)
-      ? value as ThemeName
-      : LEGACY_THEME_MAP[value] ?? fallback;
-  };
-  const theme = normalizeTheme(raw.theme, defaultSettings.appearance.theme);
-  const lightTheme = normalizeTheme(raw.lightTheme, theme === 'ink-black' || theme === 'violet-black' || theme === 'cyan-black'
-    ? defaultSettings.appearance.lightTheme
-    : theme);
-  const darkTheme = normalizeTheme(raw.darkTheme, theme === 'paper-white' || theme === 'warm-ivory'
-    ? defaultSettings.appearance.darkTheme
-    : theme);
-  const themeMode: ThemeMode = raw.themeMode === 'system' ? 'system' : 'manual';
-
-  return { theme, themeMode, lightTheme, darkTheme };
-}
-
-/**
- * Load settings from localStorage (fallback for when Tauri store is not available).
- */
-function loadSettingsFromStorage(): AppSettings {
-  try {
-    const stored = localStorage.getItem(SETTINGS_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      // Merge with defaults to handle new settings added in updates
-      return {
-        terminal: { ...defaultSettings.terminal, ...parsed.terminal },
-        appearance: normalizeAppearanceSettings(parsed.appearance),
-      };
-    }
-  } catch (error) {
-    console.warn('Failed to load settings from storage:', error);
-  }
-  return { ...defaultSettings };
-}
-
-/**
- * Save settings to localStorage.
- */
-function saveSettingsToStorage(settings: AppSettings): void {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch (error) {
-    console.warn('Failed to save settings to storage:', error);
-  }
-}
-
-/**
- * Try to load settings from Tauri backend, fallback to localStorage.
- */
-async function loadSettings(): Promise<AppSettings> {
-  try {
-    const settings = await invokeOrThrow<AppSettings | null>('load_settings');
-    if (settings) {
-      // Merge with defaults to handle new settings added in updates
-      return {
-        terminal: { ...defaultSettings.terminal, ...settings.terminal },
-        appearance: normalizeAppearanceSettings(settings.appearance),
-      };
-    }
-  } catch (error) {
-    console.warn('Failed to load settings from Tauri, using localStorage:', error);
-  }
-  return loadSettingsFromStorage();
-}
-
-/**
- * Save settings to Tauri backend and localStorage.
- */
-async function saveSettings(settings: AppSettings): Promise<void> {
-  // Always save to localStorage as backup
-  saveSettingsToStorage(settings);
-
-  try {
-    await invokeOrThrow('save_settings', { settings });
-  } catch (error) {
-    console.warn('Failed to save settings to Tauri backend:', error);
-  }
-}
 
 async function loadUploadIgnoreConfig(): Promise<UploadIgnoreConfig> {
   try {
@@ -303,14 +120,15 @@ async function saveUploadIgnoreConfig(config: UploadIgnoreConfig): Promise<Uploa
 // ============================================================================
 
 /**
- * Zustand store for settings and AI tool integrations.
+ * Zustand store for what an operator can still tune. Terminal presentation and
+ * the colour theme are fixed in code, so only the transfer ignore rules and the
+ * read-only status fields live here.
  */
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   // Initial state
   gatewayStatus: null,
   appVersion: null,
   appVersionLoaded: false,
-  settings: { ...defaultSettings },
   uploadIgnoreConfig: { ...defaultUploadIgnoreConfig },
   loading: false,
   error: null,
@@ -345,43 +163,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     if (get().initialized) return;
 
     try {
-      const [settings, uploadIgnoreConfig] = await Promise.all([
-        loadSettings(),
-        loadUploadIgnoreConfig(),
-      ]);
-      set({ settings, uploadIgnoreConfig, initialized: true });
+      const uploadIgnoreConfig = await loadUploadIgnoreConfig();
+      set({ uploadIgnoreConfig, initialized: true });
     } catch (error) {
       console.error('Failed to initialize settings:', error);
       set({ initialized: true }); // Mark as initialized even on error to prevent infinite loops
     }
-  },
-
-  updateTerminalSettings: async (terminalUpdates: Partial<TerminalSettings>) => {
-    const currentSettings = get().settings;
-    const newSettings: AppSettings = {
-      ...currentSettings,
-      terminal: {
-        ...currentSettings.terminal,
-        ...terminalUpdates,
-      },
-    };
-
-    set({ settings: newSettings });
-    await saveSettings(newSettings);
-  },
-
-  updateAppearanceSettings: async (appearanceUpdates: Partial<AppearanceSettings>) => {
-    const currentSettings = get().settings;
-    const newSettings: AppSettings = {
-      ...currentSettings,
-      appearance: {
-        ...currentSettings.appearance,
-        ...appearanceUpdates,
-      },
-    };
-
-    set({ settings: newSettings });
-    await saveSettings(newSettings);
   },
 
   updateUploadIgnoreConfig: async (uploadIgnoreUpdates: Partial<UploadIgnoreConfig>) => {
@@ -400,152 +187,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   resetSettings: async () => {
-    set({
-      settings: { ...defaultSettings },
-      uploadIgnoreConfig: { ...defaultUploadIgnoreConfig },
-    });
-    await saveSettings(defaultSettings);
+    set({ uploadIgnoreConfig: { ...defaultUploadIgnoreConfig } });
     await saveUploadIgnoreConfig(defaultUploadIgnoreConfig);
   },
 }));
-
-// ============================================================================
-// Theme Definitions (for use in components)
-// ============================================================================
-
-export interface ThemeDefinition {
-  name: ThemeName;
-  displayName: string;
-  colors: {
-    bg: string;
-    bgDark: string;
-    bgHl: string;
-    fg: string;
-    fgDark: string;
-    accent: string;
-    onAccent: string;
-    red: string;
-    green: string;
-    yellow: string;
-    magenta: string;
-    cyan: string;
-    orange: string;
-  };
-}
-
-export const themes: ThemeDefinition[] = [
-  {
-    name: 'paper-white',
-    displayName: 'Paper White',
-    colors: {
-      bg: '#ffffff',
-      bgDark: '#f7f7f5',
-      bgHl: '#e7e7e3',
-      fg: '#171717',
-      fgDark: '#73736e',
-      accent: '#6d4aff',
-      onAccent: '#ffffff',
-      red: '#b52f3e',
-      green: '#18714a',
-      yellow: '#805200',
-      magenta: '#743796',
-      cyan: '#087477',
-      orange: '#974117',
-    },
-  },
-  {
-    name: 'warm-ivory',
-    displayName: 'Warm Ivory',
-    colors: {
-      bg: '#f7f3ea',
-      bgDark: '#eee8dd',
-      bgHl: '#ded5c6',
-      fg: '#181714',
-      fgDark: '#746e64',
-      accent: '#5d3fd3',
-      onAccent: '#ffffff',
-      red: '#b52f3e',
-      green: '#18714a',
-      yellow: '#805200',
-      magenta: '#743796',
-      cyan: '#087477',
-      orange: '#974117',
-    },
-  },
-  {
-    name: 'ink-black',
-    displayName: 'Ink Black',
-    colors: {
-      bg: '#0b0b0c',
-      bgDark: '#050506',
-      bgHl: '#1c1c1f',
-      fg: '#f5f5f4',
-      fgDark: '#85858c',
-      accent: '#a78bfa',
-      onAccent: '#0b0b0c',
-      red: '#ff7b86',
-      green: '#63d9a0',
-      yellow: '#e7b75f',
-      magenta: '#d8a1f0',
-      cyan: '#55d6d8',
-      orange: '#ff9c68',
-    },
-  },
-  {
-    name: 'violet-black',
-    displayName: 'Violet Black',
-    colors: {
-      bg: '#100d16',
-      bgDark: '#09070d',
-      bgHl: '#282032',
-      fg: '#f4efff',
-      fgDark: '#958aa6',
-      accent: '#9b72ff',
-      onAccent: '#100d16',
-      red: '#ff7b86',
-      green: '#63d9a0',
-      yellow: '#e7b75f',
-      magenta: '#d8a1f0',
-      cyan: '#55d6d8',
-      orange: '#ff9c68',
-    },
-  },
-  {
-    name: 'cyan-black',
-    displayName: 'Cyan Black',
-    colors: {
-      bg: '#071112',
-      bgDark: '#04090a',
-      bgHl: '#112729',
-      fg: '#e9f8f7',
-      fgDark: '#7b9998',
-      accent: '#2dd4bf',
-      onAccent: '#071112',
-      red: '#ff7b86',
-      green: '#63d9a0',
-      yellow: '#e7b75f',
-      magenta: '#d8a1f0',
-      cyan: '#55d6d8',
-      orange: '#ff9c68',
-    },
-  },
-];
-
-/**
- * Font family options for the terminal.
- */
-export const fontFamilies: { value: FontFamily; label: string }[] = [
-  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
-  { value: 'Fira Code', label: 'Fira Code' },
-  { value: 'Consolas', label: 'Consolas' },
-  { value: 'Monaco', label: 'Monaco' },
-];
-
-/**
- * Cursor style options for the terminal.
- */
-export const cursorStyles: { value: CursorStyle; label: string }[] = [
-  { value: 'block', label: 'Block' },
-  { value: 'underline', label: 'Underline' },
-  { value: 'bar', label: 'Bar' },
-];

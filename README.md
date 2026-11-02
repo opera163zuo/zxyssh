@@ -15,7 +15,6 @@
 
 ![Terminal, host status and visible agent operations in one zxySSH workspace](docs/assets/screenshots/tour-collaboration.png)
 
-*Real zxySSH components, synthetic Northstar demo data. The gallery uses an isolated browser fixture: no live servers, credentials, model calls, or service restarts. Agent transcripts and command results are examples, not recordings of an actual agent run. [Reproduce the screenshots](scripts/readme-demo/README.md).*
 
 ## Less passing context between tools
 
@@ -34,14 +33,6 @@ Desktop and MCP use the same saved servers, and an Agent works inside the sessio
 Two collaboration shapes remain. Shared input goes into an interactive shell you are both looking at; independent execution lets an Agent inspect a host without typing over your work. Both are visible in history, and “input sent” stays separate from “command completed.”
 
 An agent-created session appears as another tab without switching away from the tab you selected. Two connections to the same server remain two sessions, not one ambiguous server-name tab. History can be paged through and recovered after reopening the UI.
-
-### Approve the actual operation, not a vague request
-
-The approval dialog puts the proposed command and the reasons for review in front of you. You can allow that operation or reject it instead of discovering a service restart in the transcript afterward. MCP tool calls keep the same permission and confirmation checks, and a transport with no approval surface fails closed.
-
-![Actual agent approval dialog showing the proposed restart and reasons for review](docs/assets/screenshots/tour-agent-approval.png)
-
-*Demo request only. The service restart in this image was never executed. Command classification and approval are useful controls, not a sandbox or a guarantee that every risky command will be recognized.*
 
 ## A terminal that helps with the small things
 
@@ -70,7 +61,6 @@ Move file and terminal panes around, split the workspace, or detach a document i
 
 Folder transfer is also about correctness: bounded chunks, downloads that wait for local writes, content comparison for same-size edits, and protection for excluded paths and nested `.gitignore` rules when deleting extras. Content comparison can add remote reads; it is not a promise of lower bandwidth.
 
-[Local files, Markdown behavior and editing limits](docs/local-files-and-css-themes.md)
 
 ## A terminal, or an Agent through MCP
 
@@ -85,7 +75,7 @@ Paired Agents are limited on purpose. They see the site list and the terminal in
 | Run a privileged command | The sudo password and an exact command allowlist are configured by a person; the Agent never sees the secret |
 | Close its own session | Batch termination is refused for Agents |
 
-Anything beyond that — arbitrary `exec`, remote file search, SFTP upload or download, editing server records — stays out of the paired Agent surface. Operations appear in the desktop activity panel, and commands that need approval fail closed when no approval UI is attached.
+Anything beyond that — arbitrary `exec`, remote file search, SFTP upload or download, editing server records — stays out of the paired Agent surface. Every permitted operation appears in the desktop activity panel.
 
 [Agent collaboration model](docs/AGENT_COLLABORATION.md) · [Main Skill reference](skills/zxyssh/SKILL.md)
 
@@ -93,11 +83,8 @@ Anything beyond that — arbitrary `exec`, remote file search, SFTP upload or do
 
 **Keep context, not a pile of windows.** Terminals and documents can be split, rearranged and moved into separate windows. Save a layout and return to it; restoring the workspace is not a promise that an old network connection survives a process restart.
 
-**Make long sessions comfortable.** Choose light or dark themes, follow the system appearance, adjust terminal fonts and cursors, and use keyboard navigation or reduced-motion settings. The application has English and Simplified Chinese UI; the Japanese README is a documentation translation, not a claim of Japanese UI support.
 
-**Go beyond a color preset.** The custom CSS editor supports live preview, apply/save, import/export and local background images. Change spacing, corners and document typography as well as colors. If a theme hides the controls, **⌘/Ctrl+Shift+F12** or the native *Disable Custom CSS* menu can turn it off. Only apply trusted CSS: remote URLs in a theme can make network requests.
 
-[Custom CSS guide and recovery](docs/local-files-and-css-themes.md) · [Starter theme](themes/vibecode-starter.css)
 
 ## The SSH essentials are still here
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { KeyRound, Link2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
+import { Ban, Check, KeyRound, Link2, Pencil, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 
 import {
   useMcpPairingStore,
@@ -8,6 +8,8 @@ import {
 } from '../../stores/mcpPairingStore';
 
 const POLL_INTERVAL_MS = 2_000;
+/// How often to look for codeless requests an Agent may open at any moment.
+const REQUEST_POLL_INTERVAL_MS = 3_000;
 
 function remainingSeconds(expiresAt: number, now: number): number {
   return Math.max(0, Math.ceil(expiresAt - now / 1000));
@@ -25,7 +27,12 @@ export function AgentPairingPanel() {
   const createCode = useMcpPairingStore((state) => state.createCode);
   const checkCode = useMcpPairingStore((state) => state.checkCode);
   const pairedJustNow = useMcpPairingStore((state) => state.pairedJustNow);
+  const requests = useMcpPairingStore((state) => state.requests);
+  const refreshRequests = useMcpPairingStore((state) => state.refreshRequests);
+  const approveRequest = useMcpPairingStore((state) => state.approveRequest);
+  const rejectRequest = useMcpPairingStore((state) => state.rejectRequest);
   const revoke = useMcpPairingStore((state) => state.revoke);
+  const forget = useMcpPairingStore((state) => state.forget);
   const rename = useMcpPairingStore((state) => state.rename);
   const rotate = useMcpPairingStore((state) => state.rotate);
   const dismissIssuedToken = useMcpPairingStore((state) => state.dismissIssuedToken);
@@ -54,6 +61,15 @@ export function AgentPairingPanel() {
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [code, checkCode]);
+
+  // A codeless request arrives from a machine the operator has never seen, so
+  // the panel has to be looking when it lands.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshRequests();
+    }, REQUEST_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [refreshRequests]);
 
   const codeRemaining = code ? remainingSeconds(code.expiresAt, now) : 0;
 
@@ -151,6 +167,7 @@ export function AgentPairingPanel() {
         <div className="flex flex-wrap items-center gap-3 border-b border-tokyo-bg-hl bg-tokyo-bg/60 px-4 py-3">
           <span className="text-xs text-tokyo-yellow">{t('settings.pairingTokenOnce')}</span>
           <code className="break-all font-mono text-xs text-tokyo-fg">{issuedToken}</code>
+          <span className="text-xs text-tokyo-comment">{t('settings.pairingTokenSafeStorage')}</span>
           <button type="button" className="icon-button" onClick={dismissIssuedToken}>
             {t('settings.pairingTokenDone')}
           </button>
@@ -161,13 +178,59 @@ export function AgentPairingPanel() {
         <h4 className="text-xs font-medium uppercase tracking-wide text-tokyo-comment">
           {t('settings.pairingAgents')}
         </h4>
-        {agents.length === 0 ? (
+        {agents.length === 0 && requests.length === 0 ? (
           <p className="mt-2 text-xs text-tokyo-comment">{t('settings.pairingNoAgents')}</p>
         ) : (
           <ul className="mt-2 space-y-2">
+            {requests.map((request) => (
+              <li
+                key={`request-${request.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 rounded border border-tokyo-yellow/50 bg-tokyo-bg px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm text-tokyo-fg">{request.agentName}</span>
+                    <span className="rounded border border-tokyo-yellow/60 px-1.5 text-xs text-tokyo-yellow">
+                      {t('settings.pairingRequestPending')}
+                    </span>
+                  </div>
+                  <div className="font-mono text-xs text-tokyo-comment">
+                    {request.peer} ·{' '}
+                    {t('settings.pairingRequestExpiresIn', {
+                      seconds: remainingSeconds(request.expiresAt, now),
+                    })}
+                  </div>
+                  <div className="mt-1 text-xs text-tokyo-comment">
+                    {t('settings.pairingRequestSelfDelivery')}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    disabled={busy}
+                    onClick={() => void approveRequest(request.id)}
+                    title={t('settings.pairingRequestApprove')}
+                    aria-label={t('settings.pairingRequestApprove')}
+                  >
+                    <Check className="h-4 w-4 text-tokyo-green" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    disabled={busy}
+                    onClick={() => void rejectRequest(request.id)}
+                    title={t('settings.pairingRequestReject')}
+                    aria-label={t('settings.pairingRequestReject')}
+                  >
+                    <Ban className="h-4 w-4 text-tokyo-red" />
+                  </button>
+                </div>
+              </li>
+            ))}
             {agents.map((agent) => (
               <AgentRow
-                key={agent.id}
+                key={`agent-${agent.id}`}
                 agent={agent}
                 busy={busy}
                 editing={editing?.id === agent.id ? editing.name : null}
@@ -178,6 +241,7 @@ export function AgentPairingPanel() {
                   void rename(agent.id, name);
                 }}
                 onRevoke={() => void revoke(agent.id)}
+                onForget={() => void forget(agent.id)}
                 onRotate={() => void rotate(agent.id)}
               />
             ))}
@@ -197,6 +261,7 @@ function AgentRow({
   onCancelEdit,
   onSaveName,
   onRevoke,
+  onForget,
   onRotate,
 }: {
   agent: PairedAgent;
@@ -206,6 +271,7 @@ function AgentRow({
   onCancelEdit: () => void;
   onSaveName: (name: string) => void;
   onRevoke: () => void;
+  onForget: () => void;
   onRotate: () => void;
 }) {
   const { t } = useTranslation();
@@ -251,20 +317,55 @@ function AgentRow({
           {agent.id.slice(0, 8)}
         </div>
       </div>
-      {!agent.revoked && (
-        <div className="flex items-center gap-2">
-          <button type="button" className="icon-button" disabled={busy} onClick={() => onEdit(agent.name)}>
-            {t('settings.pairingRename')}
+      {/* Icons only: a CJK label in a narrow flex row wraps to two lines and
+          makes every row look broken. */}
+      <div className="flex shrink-0 items-center gap-1">
+        {agent.revoked ? (
+          <button
+            type="button"
+            className="icon-button"
+            disabled={busy}
+            onClick={onForget}
+            title={t('settings.pairingForget')}
+            aria-label={t('settings.pairingForget')}
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
-          <button type="button" className="icon-button" disabled={busy} onClick={onRotate}>
-            {t('settings.pairingRotate')}
-          </button>
-          <button type="button" className="icon-button" disabled={busy} onClick={onRevoke}>
-            <Trash2 className="h-4 w-4 text-tokyo-red" />
-            {t('settings.pairingRevoke')}
-          </button>
-        </div>
-      )}
+        ) : (
+          <>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              onClick={() => onEdit(agent.name)}
+              title={t('settings.pairingRename')}
+              aria-label={t('settings.pairingRename')}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              onClick={onRotate}
+              title={t('settings.pairingRotate')}
+              aria-label={t('settings.pairingRotate')}
+            >
+              <KeyRound className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              onClick={onRevoke}
+              title={t('settings.pairingRevoke')}
+              aria-label={t('settings.pairingRevoke')}
+            >
+              <Ban className="h-4 w-4 text-tokyo-red" />
+            </button>
+          </>
+        )}
+      </div>
     </li>
   );
 }

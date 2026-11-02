@@ -11,7 +11,7 @@ Hermes / any MCP client  ──HTTP + Bearer token──▶  zxyssh mcp serve  �
 
 Verified on Debian 13 with an isolated loopback OpenSSH container: pairing,
 `initialize`, `tools/list`, `server_add`, key-based `session_create`, `exec`,
-`sftp_ls`, fail-closed approval, and immediate revocation.
+`sftp_ls`, encrypted audit records, and immediate revocation.
 
 ## 1. Install the same-user service
 
@@ -98,10 +98,40 @@ command; it reads the code from stdin, collects the credential (sealed when it
 offers a key) and prints it once:
 
 ```bash
-~/.local/bin/zxyssh mcp pair --endpoint http://192.168.0.96:8765 --name hermes-laptop
+~/.local/bin/zxyssh mcp pair --name hermes-laptop
 ```
 
-Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/pair` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display.
+An Agent that must not be handed a code — because a chat transcript is a log like
+any other — can open the pairing itself and wait for a human:
+
+```bash
+~/.local/bin/zxyssh mcp pair --name hermes-laptop --no-code
+```
+
+The reference CLI generates an ephemeral key and polls until approved; the
+credential is returned sealed to that CLI. An HTTP-only Agent can do the same
+with no key and no CLI at all:
+
+```text
+POST /pair/request {"name":"Hermes"}
+     -> 202 {"requestId":"...","status":"awaiting_consent"}
+POST /pair/status {"requestId":"..."}
+     -> 200 {"status":"awaiting_consent"}                     (keep polling)
+     -> 200 {"status":"delivered","agentId":"...","name":"Hermes","token":"vsh_…","tokenType":"Bearer"}
+```
+
+The desktop shows the request in the Agent list with its source address and
+countdown; approval is the moment the credential comes into existence. The
+requestor collects that credential from its own poll, exactly once, so there is
+nothing for the operator to copy and nothing to paste into a chat. A second poll
+on the same `requestId` answers `delivered` with no credential in it. An
+unanswered request expires after 900 seconds having issued nothing, and refusing
+one leaves nothing to revoke. Headless, `zxyssh mcp requests list` and
+`requests approve <id>` make the same decision as the desktop button.
+
+A connector that only has the service URL can first fetch `/.well-known/zxyssh-mcp.json`. It is public metadata — no token, no OAuth exchange — and describes the Streamable HTTP `/mcp` endpoint, static Bearer authentication and both pairing doors. A 401 response also points to this document and `/pair/request`.
+
+Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/.well-known/zxyssh-mcp.json`, `/pair`, `/pair/request` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display, and `mcp pair` reads that file when `--endpoint` is omitted.
 
 ```bash
 ~/.local/bin/zxyssh mcp agents
@@ -143,7 +173,7 @@ bash scripts/test-lan-mcp-gateway.sh                  # free port, detected IPv4
 bash scripts/test-lan-mcp-gateway.sh 192.168.1.20     # name the interface address
 ```
 
-It asserts 18 checks in four groups:
+It asserts 29 checks in four groups:
 
 1. **Boot guard** — a non-loopback bind with no paired Agent must refuse to start.
 2. **Transport and auth** — health, `401` with no token and with a forged one,
@@ -186,10 +216,6 @@ systemctl --user start zxyssh-mcp.service
 
 ## 8. What this service does not do
 
-- **No self-approval.** Risky commands are gated by the human approval UI, which
-  a headless process does not have. Such a call fails closed with
-  `Command requires user approval, but no approval UI is available.` Read-only
-  and non-flagged operations run normally.
 - **No shared isolation between Agents.** They share one database, but each paired HTTP Agent can only use sessions it created through the LAN tool surface. Two Agents are still not full tenants; saved sites and the configured sudo capability are common to the service.
 - **No arbitrary root shell guarantee.** `session_sudo` is an explicit configured-password operation; any Agent with the token can request the configured site's sudo capability. Do not configure it unless that is intended, and do not treat it as protection from a command running as root on the target host.
 - **No TLS in the process.** Use a proxy or a private network, as above.

@@ -137,10 +137,10 @@ pub fn get_compact_tool_definitions() -> Vec<ToolDefinition> {
 
 fn compact_description(name: &str) -> String {
     match name {
-        "session_send_input" => "Send visible terminal input (approval-gated).".to_string(),
+        "session_send_input" => "Send visible terminal input.".to_string(),
         "session_sudo" => "Run a server-configured non-interactive sudo command.".to_string(),
         "session_read" => "Read recent visible terminal output.".to_string(),
-        "exec" => "Run isolated SSH command (approval-gated).".to_string(),
+        "exec" => "Run isolated SSH command.".to_string(),
         "server_list" => "List saved servers.".to_string(),
         "session_list" => "List sessions.".to_string(),
         _ => name.replace('_', " "),

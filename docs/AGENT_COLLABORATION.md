@@ -18,8 +18,6 @@ Agent-created sessions appear as their own tabs and never steal the person's act
 
 The activity store is locally encrypted and is not cloud-synced. SFTP events record operation and path context, not file contents. Saved credentials and protected input are never logged as commands, and an ordinary command string can itself contain a secret, so do not put secrets in arguments.
 
-A transport with no approval UI attached fails a confirmation-requiring call closed instead of running it unattended. Approval means a person saw this command, on this session, before it ran.
-
 ## Sessions and process ownership
 
 Terminal input, resize, read, sudo and kill are routed to the process that owns the selected SSH session. The GUI owns the service when it starts one; a same-user service started by systemd can own sessions that outlive a GUI window, while GUI-owned connections end when that process exits.
@@ -40,7 +38,7 @@ This changes zxySSH's saved login information, not the remote OS account passwor
 
 `plugins/builtin/<id>/plugin.json`, `BUILTIN_MANIFESTS` and `docs/plugin-spec.md` remain in the repository, and the reference catalog under `skills/zxyssh/references/` is still parity-checked by `scripts/check-release.mjs`. Since the 2.0 narrowing, no plugin action is reachable by a person or an Agent: the marketplace and panel UI were removed, the CLI plugin commands were removed, and plugin tools are not advertised over MCP.
 
-Treat the reference documents as maintenance-time descriptions of a runtime that is currently not exposed. Do not implement an Agent-facing plugin call by assuming a `plugins` command or a `plugin_*` MCP tool exists; adding that surface is a tool-allowlist, permission and approval change that needs its own design and tests.
+Treat the reference documents as maintenance-time descriptions of a runtime that is currently not exposed. Do not implement an Agent-facing plugin call by assuming a `plugins` command or a `plugin_*` MCP tool exists; adding that surface is a tool-allowlist and permission change that needs its own design and tests.
 
 Regenerate repository references with `cargo run --locked -p zxyssh-plugins --example export_references`; add `-- --check` in CI. This touches no user directories or live sessions.
 

@@ -1,5 +1,80 @@
 # Changelog
 
+## 2.4.0 — 2026-11-03
+
+### Settings now expose only operational choices
+
+The terminal presentation is fixed at 14px JetBrains Mono with a block cursor,
+blinking and 10,000 lines of scrollback. The application now ships one fixed
+Paper White palette; theme picking, system-appearance following, custom CSS,
+wallpaper injection and the unused theme starter are removed. The language
+selector and Agent pairing remain in Settings.
+
+The Agent command-classification and approval system is also removed. Paired
+Agents remain bounded by the tool allowlist, per-Agent session ownership,
+server-side host-key verification and exact sudo policies, while all allowed
+operations continue to be recorded in encrypted activity history.
+
+### A URL now explains how to connect
+
+A new Agent that only knows the MCP URL no longer has to guess why `/mcp`
+returns 401 or whether this is OAuth. `/.well-known/zxyssh-mcp.json` is public
+and contains no secrets: it identifies Streamable HTTP, static Bearer auth, the
+`/mcp` endpoint, and both pairing doors. The 401 response also gives a concise
+pointer to that metadata and `/pair/request`, so a connector can discover the
+onboarding path without being granted access.
+
+### An Agent can now ask to be paired, without being handed a code
+
+A modern Agent will refuse to take a pairing code through its own chat log, and
+it is right to: the code is a credential, so a transcript — and whatever server
+keeps it — becomes a place where a secret sat. That left no way at all to
+onboard such an Agent.
+
+`zxyssh mcp pair --name hermes --no-code` now opens the pairing itself. It posts
+`POST /pair/request {"name","clientPublicKey"}`, which creates **nothing**, and
+waits. The desktop puts it directly in the **Agent list**, above the paired
+records, with an **等待同意** badge, the source address and its expiry countdown;
+the same row has approve and reject buttons. Headless, `zxyssh mcp requests list`
+and `requests approve <id>` do the same job. Because this CLI makes an ephemeral
+key, approval seals the credential to it and its poll takes the result once.
+
+A URL-only Agent sends `POST /pair/request {"name"}` with no key. Approval still
+creates the credential only at the button press, and now the Agent that asked is
+the Agent that receives it: `/pair/status` answers `delivered` with the bearer
+token in it, once, so **nothing is shown to the operator to copy**. A second poll
+on the same request id carries no credential. A request nobody answers expires
+after 900 seconds having issued nothing, and refusing one leaves nothing to
+revoke.
+
+The code door is unchanged and still the default way in: a correct six-digit
+code pairs immediately, with no approval step, because an unattended host cannot
+wait for somebody to click. One peer may queue three requests and twenty exist
+in total, so nobody can bury the approve button.
+
+### A revoked Agent can finally leave the list
+
+`revoke` marked a record and left it in Settings forever, so after a handful of
+pairing attempts the panel was a column of **已吊销** rows with nothing to do
+about them. Deleting a revoked record is now an action of its own. It refuses
+one whose credential is still live — retire it first — so a stray click cannot
+drop a credential an Agent is actually using.
+
+The row's three actions were text inside a button sized for an icon, which
+wrapped every CJK label onto two lines (**重命/名**, **轮换/凭据**, **吊/销**).
+They are icons now — pencil, key, ban — with the wording as the tooltip and the
+accessible name, and a revoked row carries the single delete control it needs.
+
+### The icon stopped quoting the old name
+
+The mark was a downward **V** on a dark tile, drawn before the vibeshell →
+zxySSH rename, and it meant nothing to the product. It is a terminal prompt
+now: a chevron with a cursor after it, keeping the same dark tile, hairline
+border and teal accent so it still reads as the same application. The favicon,
+the 32/64/128/128@2x taskbar set and the macOS bundle icon were regenerated
+from the new source; the Windows and Android/iOS assets `tauri icon` also
+writes are deleted again, because this repository ships Linux only.
+
 ## 2.3.0 — 2026-11-01
 
 ### Pairing follows the listener address

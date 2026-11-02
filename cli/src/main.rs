@@ -78,4 +78,15 @@ mod tests {
         assert!(Cli::try_parse_from(["zxyssh", "plugins", "list"]).is_err());
         assert!(Cli::try_parse_from(["zxyssh", "sftp", "server"]).is_err());
     }
+
+    /// An Agent that must not handle a code still needs a parseable door.
+    #[test]
+    fn codeless_pairing_and_request_management_parse() {
+        assert!(
+            Cli::try_parse_from(["zxyssh", "mcp", "pair", "--name", "hermes", "--no-code"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["zxyssh", "mcp", "requests", "list"]).is_ok());
+        assert!(Cli::try_parse_from(["zxyssh", "mcp", "requests", "approve", "abc123"]).is_ok());
+        assert!(Cli::try_parse_from(["zxyssh", "mcp", "requests", "reject", "abc123"]).is_ok());
+    }
 }

@@ -127,6 +127,7 @@ echo "== 2. loopback transport, pairing and authorisation =="
 LB="$WORK/loopback"; mkdir -p "$LB"; chmod 700 "$LB"
 start "$LB" "127.0.0.1:$PORT" || fail "service did not come up: $(cat "$LB/serve.log")"
 expect "health over loopback" "$(curl -s -m 3 "http://127.0.0.1:$PORT/health" | json status)" "ok"
+expect "onboarding metadata is public" "$(curl -s -m 3 "http://127.0.0.1:$PORT/.well-known/zxyssh-mcp.json" | json mcpEndpoint)" "/mcp"
 expect "MCP without a token" "$(http_code "127.0.0.1:$PORT" "")" "401"
 expect "MCP with a forged token" "$(http_code "127.0.0.1:$PORT" "vsh_not_a_real_credential")" "401"
 
@@ -141,6 +142,53 @@ CODE=$(mint "$LB")
 TOKEN=$(pair "smoke-loopback" "$CODE" "$LB")
 [ "${#TOKEN}" = "47" ] || fail "pairing returned no token: ${TOKEN:0:6}…"
 ok "a sealed pairing returned a 47-character Agent token"
+
+# A pairing with no code must create nothing until a human answers it.
+CONSENT_BODY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/request" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"smoke-consent\",\"clientPublicKey\":\"$(client_key)\"}")
+expect "a codeless request waits for an operator" "$(printf '%s' "$CONSENT_BODY" | json status)" "awaiting_consent"
+REQ_ID=$(printf '%s' "$CONSENT_BODY" | json requestId)
+XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | grep -q smoke-consent \
+  && fail "an unapproved request created an Agent" \
+  || ok "an unapproved request created no Agent"
+expect "polling before approval" \
+  "$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" -H 'Content-Type: application/json' \
+      -d "{\"requestId\":\"$REQ_ID\"}" | json status)" "awaiting_consent"
+XDG_DATA_HOME="$LB" "$BIN" mcp requests approve "$REQ_ID" >/dev/null \
+  || fail "could not approve request $REQ_ID"
+XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | grep -q smoke-consent \
+  && ok "approval is what creates the credential" \
+  || fail "approving the request issued no Agent"
+CONSENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-consent/{print $1}')
+XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${CONSENT_ID:0:8}" >/dev/null
+
+# A URL-only Agent never sees a token in chat: it asks, a human clicks, and the
+# credential comes back to the Agent's own poll — exactly once.
+HTTP_ONLY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/request" \
+  -H 'Content-Type: application/json' -d '{"name":"smoke-http-only"}')
+expect "HTTP-only request does not need a client key" \
+  "$(printf '%s' "$HTTP_ONLY" | json status)" "awaiting_consent"
+HTTP_REQ_ID=$(printf '%s' "$HTTP_ONLY" | json requestId)
+XDG_DATA_HOME="$LB" "$BIN" mcp requests approve "$HTTP_REQ_ID" >/dev/null \
+  || fail "could not approve HTTP-only request $HTTP_REQ_ID"
+HTTP_POLL=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" \
+  -H 'Content-Type: application/json' -d "{\"requestId\":\"$HTTP_REQ_ID\"}")
+expect "the requestor collects its own credential" \
+  "$(printf '%s' "$HTTP_POLL" | json status)" "delivered"
+HTTP_TOKEN=$(printf '%s' "$HTTP_POLL" | json token)
+[ "${#HTTP_TOKEN}" = "47" ] || fail "the approved pairing carried no token: ${HTTP_TOKEN:0:6}…"
+expect "the delivered token authenticates" \
+  "$(rpc "127.0.0.1:$PORT" "$HTTP_TOKEN" '{"jsonrpc":"2.0","id":7,"method":"tools/list"}' | json result tools 0 name)" "server_list"
+grep -qF "$HTTP_TOKEN" "$LB/serve.log" && fail "the service log contains the consent token" \
+  || ok "the service log never recorded the consent token"
+HTTP_REPLAY=$(curl -s -m 8 -X POST "http://127.0.0.1:$PORT/pair/status" \
+  -H 'Content-Type: application/json' -d "{\"requestId\":\"$HTTP_REQ_ID\"}")
+printf '%s' "$HTTP_REPLAY" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "token" not in d and "sealedToken" not in d' \
+  && ok "the credential is not handed out twice" \
+  || fail "a replayed poll still received a credential"
+HTTP_AGENT_ID=$(XDG_DATA_HOME="$LB" "$BIN" mcp agents 2>/dev/null | awk '/smoke-http-only/{print $1}')
+XDG_DATA_HOME="$LB" "$BIN" mcp revoke "${HTTP_AGENT_ID:0:8}" >/dev/null
 
 EP=127.0.0.1:$PORT
 expect "initialize" "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json result serverInfo name)" "zxyssh"

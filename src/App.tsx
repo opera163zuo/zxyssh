@@ -17,7 +17,6 @@ import { withDeadline } from './lib/deadline';
 import { useSessionStore, type Session } from './stores/sessionStore';
 import { useNavigationStore } from './stores/navigationStore';
 import { useNotificationStore } from './stores/notificationStore';
-import { useThemeSync } from './lib/useThemeSync';
 import { listenForLocalFileRequests, openLocalFiles } from './lib/localFiles';
 import {
   openDetachedWindow, useDetachedOwnership, detachTargetKey, canCloseWorkspaceSession,
@@ -38,7 +37,6 @@ import { SelectServerDialog } from './components/SelectServerDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { Notifications } from './components/Notifications';
 import { AgentActivityPanel, AgentActivityNotice } from './components/AgentActivityPanel';
-import { AgentApprovalDialog } from './components/AgentApprovalDialog';
 import { WorkspaceToolbar } from './components/WorkspaceToolbar';
 import { FingerprintVerificationDialog, FingerprintManagerDialog } from './components/FingerprintDialog';
 import { ServerSidebar } from './components/ServerSidebar/ServerSidebar';
@@ -125,8 +123,6 @@ function App() {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
   const sftpPanelRef = useRef<SftpPanelHandle>(null);
   const sessionBootstrapRef = useRef<Promise<void> | null>(null);
-
-  useThemeSync();
 
   useEffect(() => {
     if (!workspaceReady) return;
@@ -876,7 +872,6 @@ function App() {
 
       <FingerprintManagerDialog />
 
-      {runtimeCapabilities.agentGateway && <AgentApprovalDialog />}
     </div>
   );
 }
