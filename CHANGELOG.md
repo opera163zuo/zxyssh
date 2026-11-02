@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### A URL now explains how to connect
+
+A new Agent that only knows the MCP URL no longer has to guess why `/mcp`
+returns 401 or whether this is OAuth. `/.well-known/zxyssh-mcp.json` is public
+and contains no secrets: it identifies Streamable HTTP, static Bearer auth, the
+`/mcp` endpoint, and both pairing doors. The 401 response also gives a concise
+pointer to that metadata and `/pair/request`, so a connector can discover the
+onboarding path without being granted access.
+
 ### An Agent can now ask to be paired, without being handed a code
 
 A modern Agent will refuse to take a pairing code through its own chat log, and

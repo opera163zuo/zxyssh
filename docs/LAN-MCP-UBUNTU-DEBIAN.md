@@ -127,7 +127,9 @@ once for the operator to put in the managed secret store; run it in a private
 operator terminal, never through the Agent's chat/tool transcript. An unanswered
 request expires after 900 seconds; refusing it issues nothing.
 
-Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/pair`, `/pair/request` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display, and `mcp pair` reads that file when `--endpoint` is omitted.
+A connector that only has the service URL can first fetch `/.well-known/zxyssh-mcp.json`. It is public metadata — no token, no OAuth exchange — and describes the Streamable HTTP `/mcp` endpoint, static Bearer authentication and both pairing doors. A 401 response also points to this document and `/pair/request`.
+
+Point the Agent at `http://127.0.0.1:8765/mcp` using the issued token in the `Authorization: Bearer …` header. Every MCP route requires that header; only `/health`, `/.well-known/zxyssh-mcp.json`, `/pair`, `/pair/request` and `/pair/status` are unauthenticated. The service also publishes its listener state to `$XDG_DATA_HOME/zxyssh/mcp-lan-status.json` (mode `0600`, no credentials) for the desktop to display, and `mcp pair` reads that file when `--endpoint` is omitted.
 
 ```bash
 ~/.local/bin/zxyssh mcp agents
