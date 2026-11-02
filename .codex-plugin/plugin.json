@@ -1,13 +1,18 @@
 {
   "name": "zxyssh",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Drive saved SSH sites through the zxySSH MCP service, with credentials held on the host.",
   "author": {
     "name": "zxySSH"
   },
   "repository": "https://github.com/opera163zuo/zxyssh",
   "license": "GPL-3.0-only",
-  "keywords": ["ssh", "mcp", "remote-development", "coding-agents"],
+  "keywords": [
+    "ssh",
+    "mcp",
+    "remote-development",
+    "coding-agents"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "zxySSH",
