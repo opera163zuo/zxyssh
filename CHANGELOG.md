@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.4.0 — 2026-11-03
+## 2.4.1 — 2026-11-03
 
 ### Settings now expose only operational choices
 
