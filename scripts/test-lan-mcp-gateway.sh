@@ -196,7 +196,9 @@ expect "notifications/initialized body" \
   "$(curl -s -o /dev/null -w '%{http_code}' -m 8 -X POST "http://$EP/mcp" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"notifications/initialized"}')" "202"
 TOOLS=$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
 COUNT=$(printf '%s' "$TOOLS" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["result"]["tools"]))')
-[ "$COUNT" = "7" ] && ok "tools/list advertises the 7-tool Agent surface" || fail "tools/list returned $COUNT tools"
+[ "$COUNT" = "10" ] && ok "tools/list advertises the 10-tool Agent surface" || fail "tools/list returned $COUNT tools"
+expect "host-local sftp_upload stays refused" \
+  "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"sftp_upload","arguments":{"session_id":"any","local_path":"/etc/passwd","remote_path":"/tmp/x"}}}' | json error code)" "-32601"
 expect "tools/call server_list" \
   "$(rpc "$EP" "$TOKEN" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"server_list","arguments":{}}}' | json result content 0 text)" "[]"
 expect "unknown method" \
@@ -243,7 +245,7 @@ else
   [ "${#LTOKEN}" = "47" ] || fail "LAN pairing returned no token"
   ok "an Agent paired over $LAN_IP"
   expect "tools/list over the LAN address" \
-    "$(curl -s -m 8 -X POST "http://$LEP/mcp" -H "Authorization: Bearer $LTOKEN" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":6,"method":"tools/list"}' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["result"]["tools"]) == 7)')" "True"
+    "$(curl -s -m 8 -X POST "http://$LEP/mcp" -H "Authorization: Bearer $LTOKEN" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":6,"method":"tools/list"}' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["result"]["tools"]) == 10)')" "True"
   AGENT=$(XDG_DATA_HOME="$LAN" "$BIN" mcp agents | awk '/smoke-lan/{print $1}')
   XDG_DATA_HOME="$LAN" "$BIN" mcp revoke "${AGENT:0:8}" >/dev/null
   expect "the revoked token on its very next request" "$(http_code "$LEP" "$LTOKEN")" "401"

@@ -572,6 +572,9 @@ async fn handle_tools_call(
                 | "session_read"
                 | "session_resize"
                 | "session_kill"
+                | "sftp_ls"
+                | "sftp_read"
+                | "sftp_write"
         ) {
             if name == "session_kill" && arguments.get("all").and_then(Value::as_bool) == Some(true)
             {
