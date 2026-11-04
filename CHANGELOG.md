@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.5.0 — 2026-11-03
+
+### Paired Agents can now read and write remote files
+
+A paired Agent's tool surface grows from 7 to 10: alongside the terminal tools it
+now gets `sftp_ls`, `sftp_read` and `sftp_write`, so it can list a directory on
+the target, look at a config or log, and put a file's contents there without the
+operator moving anything by hand. Each of them takes a `session_id`, and the
+service refuses any session the calling Agent did not create, so the same
+ownership rule that governs typing governs files.
+
+What stays closed is deliberate. `sftp_upload`, `sftp_download`,
+`sftp_upload_directory` and `sftp_sync_directory` take paths on the machine
+running the MCP service, not bytes over the wire — handing them to a remote
+Agent would be a supported way to copy `~/.ssh/id_rsa` or the app-data directory
+to whatever target that Agent chooses. Moving content is what `sftp_read` and
+`sftp_write` are for. A test asserts the three file tools are reachable and the
+four host-local ones are refused, and the gateway script re-checks the count and
+the refusal over a real listener.
+
 ## 2.4.1 — 2026-11-03
 
 ### Settings now expose only operational choices

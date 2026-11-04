@@ -240,7 +240,7 @@ async fn tools_list_and_an_authorized_read_only_tool_call() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(names.len(), 7);
+    assert_eq!(names.len(), 10);
     for name in [
         "server_list",
         "session_create",
@@ -249,10 +249,21 @@ async fn tools_list_and_an_authorized_read_only_tool_call() {
         "session_read",
         "session_resize",
         "session_kill",
+        "sftp_ls",
+        "sftp_read",
+        "sftp_write",
     ] {
         assert!(names.contains(name), "missing {name}");
     }
-    for name in ["exec", "rg", "sftp_upload", "server_add", "server_delete"] {
+    for name in [
+        "exec",
+        "rg",
+        "sftp_upload",
+        "sftp_upload_directory",
+        "sftp_download",
+        "server_add",
+        "server_delete",
+    ] {
         assert!(!names.contains(name), "unexpected {name}");
     }
 
@@ -391,6 +402,42 @@ async fn revocation_stops_a_live_token_without_restarting() {
         )
         .await;
     assert_eq!(after.status(), reqwest::StatusCode::UNAUTHORIZED);
+    service.shutdown();
+}
+
+#[tokio::test]
+async fn paired_agents_cannot_reach_another_agents_sessions_over_sftp() {
+    let service = TestService::start().await;
+    let token = service.pair_token("hermes-sftp-boundary").await;
+
+    // The session id belongs to nobody in this Agent's ownership set, so even a
+    // tool that is on the allowlist must be refused before any SFTP opens.
+    let rejected = service
+        .rpc(
+            Some(&token),
+            json!({"jsonrpc":"2.0","id":32,"method":"tools/call",
+                   "params":{"name":"sftp_write","arguments":{
+                       "session_id":"someone-elses-session","path":"/tmp/x","content":"hi"}}}),
+        )
+        .await;
+    let rejected: Value = rejected.json().await.expect("sftp boundary body");
+    assert_eq!(rejected["error"]["code"], -32602);
+    assert_eq!(
+        rejected["error"]["message"],
+        "Agent is not authorized to access this session"
+    );
+
+    // Host-local file transfer stays off the paired-Agent surface.
+    let refused = service
+        .rpc(
+            Some(&token),
+            json!({"jsonrpc":"2.0","id":33,"method":"tools/call",
+                   "params":{"name":"sftp_upload","arguments":{
+                       "session_id":"any","local_path":"/etc/passwd","remote_path":"/tmp/x"}}}),
+        )
+        .await;
+    let refused: Value = refused.json().await.expect("sftp_upload refusal body");
+    assert_eq!(refused["error"]["code"], -32601);
     service.shutdown();
 }
 

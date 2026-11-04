@@ -77,6 +77,9 @@ pub fn get_agent_tool_definitions() -> Vec<ToolDefinition> {
         "session_read",
         "session_resize",
         "session_kill",
+        "sftp_ls",
+        "sftp_read",
+        "sftp_write",
     ];
     get_tool_definitions()
         .into_iter()
@@ -118,6 +121,9 @@ pub fn is_agent_tool(name: &str) -> bool {
             | "session_read"
             | "session_resize"
             | "session_kill"
+            | "sftp_ls"
+            | "sftp_read"
+            | "sftp_write"
     )
 }
 
@@ -1002,13 +1008,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paired_agent_surface_is_terminal_only() {
+    fn paired_agent_surface_is_terminal_and_remote_file_text_only() {
         let tools = get_agent_tool_definitions();
         let names = tools
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<std::collections::HashSet<_>>();
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 10);
         for allowed in [
             "server_list",
             "session_create",
@@ -1017,11 +1023,24 @@ mod tests {
             "session_read",
             "session_resize",
             "session_kill",
+            "sftp_ls",
+            "sftp_read",
+            "sftp_write",
         ] {
             assert!(names.contains(allowed), "missing {allowed}");
             assert!(is_agent_tool(allowed));
         }
-        for denied in ["exec", "rg", "sftp_upload", "server_add", "server_delete"] {
+        // `sftp_upload` reads a path on the service host, so a remote Agent could
+        // use it to copy host secrets to a machine it controls. It stays refused.
+        for denied in [
+            "exec",
+            "rg",
+            "sftp_upload",
+            "sftp_upload_directory",
+            "sftp_download",
+            "server_add",
+            "server_delete",
+        ] {
             assert!(!names.contains(denied), "unexpected {denied}");
             assert!(!is_agent_tool(denied));
         }
