@@ -83,8 +83,10 @@ Paired Agents get exactly these tools:
 | `sftp_ls` | `session_id`, optional `path`, `show_hidden` | Remote directory listing |
 | `sftp_read` | `session_id`, `path`, optional `max_bytes` (default 1 MiB) | Remote text file content |
 | `sftp_write` | `session_id`, `path`, `content` | Text written on the target host |
+| `sftp_put_bytes` | `session_id`, `path`, `data_base64`, `sha256`, optional `mode` | Bytes written on the target, verified by read-back |
+| `sftp_get_bytes` | `session_id`, `path`, optional `offset`, `length` | Base64 of a byte range, with its SHA-256 and the file size |
 
-Call `tools/list` instead of reciting this table when a live schema is needed; the schema is authoritative. Every SFTP tool is bound to a session this Agent created, so another Agent's session is refused. Any other tool name, including arbitrary `exec`, remote `rg`, site CRUD, and `sftp_upload` / `sftp_download` / directory transfer, is not offered to a paired Agent and is rejected when requested: those transfer tools read and write paths on the **service host's own disk**, so handing them to a remote Agent would expose host files such as private keys. To move a file's contents, read it with `sftp_read` and write it with `sftp_write`.
+Call `tools/list` instead of reciting this table when a live schema is needed; the schema is authoritative. Every SFTP tool is bound to a session this Agent created, so another Agent's session is refused. Any other tool name, including arbitrary `exec`, remote `rg`, site CRUD, and `sftp_upload` / `sftp_download` / directory transfer, is not offered to a paired Agent and is rejected when requested: those transfer tools read and write paths on the **service host's own disk**, so handing them to a remote Agent would expose host files such as private keys. To move a file's contents, use text with `sftp_read` / `sftp_write`, or bytes with `sftp_get_bytes` / `sftp_put_bytes`. The byte tools carry base64 inside the request and check it against a SHA-256 you declare; `sftp_put_bytes` writes a temporary file and renames only after the target's copy hashes correctly, so a mismatch leaves the real path untouched. They never name a path on the service host.
 
 ## Workflow
 

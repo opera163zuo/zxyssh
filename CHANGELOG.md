@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.6.0 — 2026-11-04
+
+### Paired Agents can move binary content
+
+The Agent surface grows from 10 tools to 12. `sftp_put_bytes` takes base64 plus a
+required SHA-256, and `sftp_get_bytes` returns a byte range as base64 with its own
+digest, the file's total size and an `eof` flag, so any content type can be paged.
+Content crosses the wire as content: bytes are hashed before anything is written,
+land in a temporary file beside the target, are read back from the target and
+hashed again, and are renamed into place only when that second hash matches. A
+failed transfer therefore leaves the previous file whole instead of leaving a
+truncated artifact for the next command to pick up. A call carries at most 8 MiB
+out and 4 MiB back; anything larger, and whole directory trees, stay a human
+action. `sftp_put_bytes` deliberately does not create parent directories, so
+placing an artifact cannot mint trees on the target as a side effect.
+
+The descriptions were telling Agents to do the opposite. `sftp_write` said "for
+binary files, use sftp_upload instead" and `sftp_read` said "use sftp_download
+instead", while the service refuses both for paired Agents because they read and
+write paths on the machine running zxySSH rather than bytes off the wire — which
+is an exfiltration path, not a file transfer. Every tool description and the
+non-UTF-8 error now state what is actually available, no Agent-facing schema
+accepts a host path, and a test asserts none can grow one. Session ownership is
+checked before a payload is decoded, so a body aimed at another Agent's session is
+turned away unread. `sftp_read` also stops returning replacement characters for a
+binary file larger than `max_bytes`: it refuses non-UTF-8 content at any size now,
+and truncation cuts on a character boundary.
+
+`scripts/test-mcp-binary-transfer.sh` pairs a real Agent against a live listener
+connected to the loopback-only OpenSSH container and moves a 1 MiB non-UTF-8 file
+out and back over HTTP, asserting that each refusal leaves nothing behind on the
+target and that neither the bytes nor their base64 reach the audit database; CI
+runs it. The gateway gate covers 32 checks on the 12-tool surface, and the OpenSSH
+fixture suite now proves the verified write, its refusals, and that a symlink at
+the target path is replaced rather than written through.
+
 ## 2.5.0 — 2026-11-03
 
 ### Paired Agents can now read and write remote files

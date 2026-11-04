@@ -61,6 +61,8 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         sftp_mv_tool(),
         sftp_read_tool(),
         sftp_write_tool(),
+        sftp_put_bytes_tool(),
+        sftp_get_bytes_tool(),
         get_content_tool(),
         edit_file_tool(),
         add_file_tool(),
@@ -80,6 +82,8 @@ pub fn get_agent_tool_definitions() -> Vec<ToolDefinition> {
         "sftp_ls",
         "sftp_read",
         "sftp_write",
+        "sftp_put_bytes",
+        "sftp_get_bytes",
     ];
     get_tool_definitions()
         .into_iter()
@@ -124,6 +128,8 @@ pub fn is_agent_tool(name: &str) -> bool {
             | "sftp_ls"
             | "sftp_read"
             | "sftp_write"
+            | "sftp_put_bytes"
+            | "sftp_get_bytes"
     )
 }
 
@@ -148,6 +154,11 @@ fn compact_description(name: &str) -> String {
         "session_read" => "Read recent visible terminal output.".to_string(),
         "exec" => "Run isolated SSH command.".to_string(),
         "server_list" => "List saved servers.".to_string(),
+        "sftp_ls" => "List a remote directory as text.".to_string(),
+        "sftp_read" => "Read a remote UTF-8 text file.".to_string(),
+        "sftp_write" => "Overwrite a remote UTF-8 text file.".to_string(),
+        "sftp_put_bytes" => "Write verified bytes to a remote file.".to_string(),
+        "sftp_get_bytes" => "Read a remote byte range as base64.".to_string(),
         "session_list" => "List sessions.".to_string(),
         _ => name.replace('_', " "),
     }
@@ -618,7 +629,7 @@ fn remote_rg_tool() -> ToolDefinition {
 fn sftp_ls_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_ls",
-        "List files and directories at a remote path.",
+        "List files and directories at a remote path as plain text, directories first. A relative `path` resolves against the remote home directory, not the terminal's current directory.",
         json!({
             "type": "object",
             "properties": {
@@ -646,7 +657,7 @@ fn sftp_ls_tool() -> ToolDefinition {
 fn sftp_upload_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_upload",
-        "Upload a file to the remote server.",
+        "Upload a file to the remote server. `local_path` is read from the disk of the machine running zxySSH, never from the caller's machine, so this tool is refused for paired HTTP Agents.",
         json!({
             "type": "object",
             "properties": {
@@ -656,7 +667,7 @@ fn sftp_upload_tool() -> ToolDefinition {
                 },
                 "local_path": {
                     "type": "string",
-                    "description": "Local file path to upload"
+                    "description": "File path on the zxySSH host's own filesystem"
                 },
                 "remote_path": {
                     "type": "string",
@@ -677,7 +688,7 @@ fn sftp_upload_tool() -> ToolDefinition {
 fn sftp_upload_directory_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_upload_directory",
-        "Upload a local directory recursively. Default excludes are configurable globally and .gitignore is respected by default.",
+        "Upload a directory recursively from the zxySSH host's own filesystem. Refused for paired HTTP Agents because it walks the service host's disk.",
         sftp_directory_transfer_schema(false),
     )
 }
@@ -685,7 +696,7 @@ fn sftp_upload_directory_tool() -> ToolDefinition {
 fn sftp_sync_directory_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_sync_directory",
-        "Synchronize a local directory to a remote directory, skipping unchanged files. Set delete_extra=true only when remote extras should be removed.",
+        "Synchronize a directory from the zxySSH host's own filesystem to the remote host, skipping unchanged files. Set delete_extra=true only when remote extras should be removed. Refused for paired HTTP Agents.",
         sftp_directory_transfer_schema(true),
     )
 }
@@ -698,7 +709,7 @@ fn sftp_directory_transfer_schema(include_delete: bool) -> Value {
         },
         "local_path": {
             "type": "string",
-            "description": "Local directory path to upload or sync"
+            "description": "Directory path on the zxySSH host's own filesystem"
         },
         "remote_path": {
             "type": "string",
@@ -740,7 +751,7 @@ fn sftp_directory_transfer_schema(include_delete: bool) -> Value {
 fn sftp_download_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_download",
-        "Download a file from the remote server.",
+        "Download a file from the remote server to `local_path` on the disk of the machine running zxySSH. Nothing is written to the caller's machine, so this tool is refused for paired HTTP Agents.",
         json!({
             "type": "object",
             "properties": {
@@ -754,7 +765,7 @@ fn sftp_download_tool() -> ToolDefinition {
                 },
                 "local_path": {
                     "type": "string",
-                    "description": "Local destination path"
+                    "description": "Destination path on the zxySSH host's own filesystem"
                 },
                 "overwrite": {
                     "type": "boolean",
@@ -851,7 +862,7 @@ fn sftp_mv_tool() -> ToolDefinition {
 fn sftp_read_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_read",
-        "Read the content of a remote text file and return it as a string. Suitable for config files, scripts, logs, etc. For binary files, use sftp_download instead.",
+        "Read a remote file as UTF-8 text. There is no offset, so a file larger than max_bytes comes back truncated with a `[Truncated: showing N/M bytes]` prefix, cut on a character boundary. A binary file fails with a non-UTF-8 error at any size, so this tool never hands back bytes to write verbatim; a paired Agent has no binary transfer tool — inspect a binary from the terminal instead.",
         json!({
             "type": "object",
             "properties": {
@@ -865,7 +876,7 @@ fn sftp_read_tool() -> ToolDefinition {
                 },
                 "max_bytes": {
                     "type": "integer",
-                    "description": "Maximum bytes to read (default: 1048576 = 1MB). Prevents accidentally reading huge files.",
+                    "description": "Maximum bytes to read (default: 1048576 = 1MB). A larger file is truncated with a prefix; there is no offset, so it cannot be paged.",
                     "default": 1048576
                 }
             },
@@ -878,7 +889,7 @@ fn sftp_read_tool() -> ToolDefinition {
 fn sftp_write_tool() -> ToolDefinition {
     ToolDefinition::new(
         "sftp_write",
-        "Write text content to a remote file. Creates the file if it doesn't exist, overwrites if it does. For binary files, use sftp_upload instead.",
+        "Write UTF-8 text to a remote file. The file is opened CREATE|TRUNCATE: an existing file is replaced with no backup, and missing parent directories are created. Because `content` is a JSON string it must be valid UTF-8, so binary content cannot be expressed here; sftp_upload reads the service host's own disk and is not available to paired Agents.",
         json!({
             "type": "object",
             "properties": {
@@ -892,10 +903,78 @@ fn sftp_write_tool() -> ToolDefinition {
                 },
                 "content": {
                     "type": "string",
-                    "description": "Text content to write to the file"
+                    "description": "UTF-8 text to write. Binary content cannot be expressed in a JSON string."
                 }
             },
             "required": ["session_id", "path", "content"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_put_bytes_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_put_bytes",
+        "Write arbitrary bytes to a remote file. Content travels in this request as base64; the service never reads a path from the machine running the Agent. `sha256` is required and is checked against the file read back from the target: the bytes land in a temporary file first and are renamed into place only after the digest matches, so a failed transfer leaves the real path untouched. Missing parent directories are NOT created. Maximum 8 MiB of decoded content per call.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID created by this Agent"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to create or replace"
+                },
+                "data_base64": {
+                    "type": "string",
+                    "description": "File bytes, standard base64 with padding"
+                },
+                "sha256": {
+                    "type": "string",
+                    "description": "Lowercase hex SHA-256 of the decoded bytes, verified by reading the file back from the target"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["overwrite", "create_new"],
+                    "description": "create_new refuses when the path already exists",
+                    "default": "overwrite"
+                }
+            },
+            "required": ["session_id", "path", "data_base64", "sha256"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn sftp_get_bytes_tool() -> ToolDefinition {
+    ToolDefinition::new(
+        "sftp_get_bytes",
+        "Read a byte range of a remote file and return it as base64, with the SHA-256 of the returned bytes and the file's total size. Unlike sftp_read this accepts any content type and can be paged with offset and length. Maximum 4 MiB per call.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID created by this Agent"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Remote file path to read"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Byte offset to start reading from",
+                    "default": 0
+                },
+                "length": {
+                    "type": "integer",
+                    "description": "Bytes to read (default: 1048576, maximum: 4194304)",
+                    "default": 1048576
+                }
+            },
+            "required": ["session_id", "path"],
             "additionalProperties": false
         }),
     )
@@ -1008,13 +1087,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paired_agent_surface_is_terminal_and_remote_file_text_only() {
+    fn paired_agent_surface_is_terminals_and_target_host_files() {
         let tools = get_agent_tool_definitions();
         let names = tools
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<std::collections::HashSet<_>>();
-        assert_eq!(names.len(), 10);
+        assert_eq!(names.len(), 12);
         for allowed in [
             "server_list",
             "session_create",
@@ -1026,9 +1105,23 @@ mod tests {
             "sftp_ls",
             "sftp_read",
             "sftp_write",
+            "sftp_put_bytes",
+            "sftp_get_bytes",
         ] {
             assert!(names.contains(allowed), "missing {allowed}");
             assert!(is_agent_tool(allowed));
+        }
+
+        // `is_agent_tool` and the advertised list are two separate gates in the
+        // request path; one drifting from the other would either hide a tool or
+        // let an unadvertised one through.
+        for tool in get_tool_definitions() {
+            assert_eq!(
+                is_agent_tool(&tool.name),
+                names.contains(tool.name.as_str()),
+                "gate and advertisement disagree on {}",
+                tool.name
+            );
         }
         // `sftp_upload` reads a path on the service host, so a remote Agent could
         // use it to copy host secrets to a machine it controls. It stays refused.
@@ -1047,11 +1140,38 @@ mod tests {
     }
 
     #[test]
+    fn paired_agents_never_reach_a_path_on_the_service_host() {
+        // The transfer tools that take a host path read the disk of the machine
+        // running zxySSH. Naming a property here is what stops any future tool
+        // from smuggling that reach onto the Agent surface by accident.
+        const HOST_LOCAL_PROPERTIES: &[&str] = &[
+            "local_path",
+            "local_file",
+            "local_dir",
+            "source_path",
+            "path_on_host",
+        ];
+
+        for tool in get_agent_tool_definitions() {
+            let properties = tool.input_schema["properties"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{} advertises no property map", tool.name));
+            for forbidden in HOST_LOCAL_PROPERTIES {
+                assert!(
+                    !properties.contains_key(*forbidden),
+                    "{} exposes {forbidden}, which would address the service host's disk",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_get_tool_definitions() {
         let tools = get_tool_definitions();
 
         // The headless service only exposes SSH/session/command/SFTP operations.
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 31);
         for name in ["plugin_list", "plugin_describe", "plugin_execute"] {
             assert!(!tools.iter().any(|tool| tool.name == name));
         }
@@ -1107,7 +1227,7 @@ mod tests {
     #[test]
     fn compact_definitions_drop_repeated_schema_prose() {
         let tools = get_compact_tool_definitions();
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 31);
         let encoded = serde_json::to_string(&tools).unwrap();
         assert!(!encoded.contains("Filter servers by group ID"));
         assert!(!encoded.contains("\"default\""));
