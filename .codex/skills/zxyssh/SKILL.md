@@ -80,8 +80,11 @@ Paired Agents get exactly these tools:
 | `session_read` | `session_id`, optional `max_bytes` (up to 65536) | Trailing terminal output |
 | `session_resize` | `session_id`, `cols`, `rows` | Updated PTY size |
 | `session_kill` | `session_id` | That session terminated |
+| `sftp_ls` | `session_id`, optional `path`, `show_hidden` | Remote directory listing |
+| `sftp_read` | `session_id`, `path`, optional `max_bytes` (default 1 MiB) | Remote text file content |
+| `sftp_write` | `session_id`, `path`, `content` | Text written on the target host |
 
-Call `tools/list` instead of reciting this table when a live schema is needed; the schema is authoritative. Any other tool name, including arbitrary `exec`, remote `rg`, SFTP transfer, and site CRUD, is not offered to a paired Agent and is rejected when requested.
+Call `tools/list` instead of reciting this table when a live schema is needed; the schema is authoritative. Every SFTP tool is bound to a session this Agent created, so another Agent's session is refused. Any other tool name, including arbitrary `exec`, remote `rg`, site CRUD, and `sftp_upload` / `sftp_download` / directory transfer, is not offered to a paired Agent and is rejected when requested: those transfer tools read and write paths on the **service host's own disk**, so handing them to a remote Agent would expose host files such as private keys. To move a file's contents, read it with `sftp_read` and write it with `sftp_write`.
 
 ## Workflow
 

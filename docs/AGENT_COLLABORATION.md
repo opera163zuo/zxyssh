@@ -6,7 +6,7 @@
 
 The desktop and the MCP service read the same saved sites. Credentials, private keys, passphrases and sudo passwords are decrypted only inside the Rust service. They do not cross into the React frontend, an Agent prompt, an activity record or a log line.
 
-A paired Agent is a terminal user, not an operator of the host. It can list sites by name, open its own session, type into that session, read its output, resize it and close it. Arbitrary `exec`, remote search, SFTP transfer, uploads, local files and site CRUD are not on the paired-Agent tool surface; asking for them is rejected rather than silently degraded.
+A paired Agent is a terminal user with remote file text access, not an operator of the host. It can list sites by name, open its own session, type into that session, read its output, resize it and close it, and list, read or write files on the target through SFTP — always on a session it created. Arbitrary `exec`, remote search, site CRUD and the host-local transfer tools (`sftp_upload`, `sftp_download`, directory upload and sync) are not on the paired-Agent tool surface; asking for them is rejected rather than silently degraded. Those transfer tools take paths on the machine running the MCP service, so exposing them would let a remote Agent copy host files, including private keys, to a target of its choosing.
 
 ## Visible operations without interfering with a person
 

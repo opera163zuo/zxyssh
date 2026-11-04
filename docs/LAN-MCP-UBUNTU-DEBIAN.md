@@ -160,7 +160,7 @@ Three steps, each on the side that owns the decision:
    ~/.local/bin/zxyssh mcp hostkey trust prod.example --port 22 --fingerprint SHA256:…
    ```
 
-Then the Agent calls `session_create` with the saved site name, followed by `session_send_input`, `session_read` and `session_resize`. The LAN surface does not expose arbitrary `exec`, SFTP, local-file upload or site mutation tools. If a sudo password is configured for the site, `session_sudo` runs a non-interactive command through a separate SSH exec channel; the password never enters the Agent request, PTY input, audit summary or response. A command that requires an interactive TTY or password change fails closed.
+Then the Agent calls `session_create` with the saved site name, followed by `session_send_input`, `session_read` and `session_resize`. It can also list, read and write files on the target with `sftp_ls`, `sftp_read` and `sftp_write`, always scoped to a session it created. The LAN surface does not expose arbitrary `exec`, remote search, site mutation, or the host-local transfer tools (`sftp_upload`, `sftp_download`, directory upload and sync): those read and write paths on the machine running this service, so a remote Agent could use them to copy host files such as private keys. If a sudo password is configured for the site, `session_sudo` runs a non-interactive command through a separate SSH exec channel; the password never enters the Agent request, PTY input, audit summary or response. A command that requires an interactive TTY or password change fails closed.
 
 ## 5. Verify before exposing it
 
@@ -173,7 +173,7 @@ bash scripts/test-lan-mcp-gateway.sh                  # free port, detected IPv4
 bash scripts/test-lan-mcp-gateway.sh 192.168.1.20     # name the interface address
 ```
 
-It asserts 29 checks in four groups:
+It asserts 30 checks in four groups:
 
 1. **Boot guard** — a non-loopback bind with no paired Agent must refuse to start.
 2. **Transport and auth** — health, `401` with no token and with a forged one,

@@ -74,8 +74,9 @@ Paired Agents are limited on purpose. They see the site list and the terminal in
 | Send keystrokes, read output, resize | An Agent can only touch sessions it created |
 | Run a privileged command | The sudo password and an exact command allowlist are configured by a person; the Agent never sees the secret |
 | Close its own session | Batch termination is refused for Agents |
+| List a remote directory, read and write remote text files | The file tools are bound to a session this Agent created; the host-local transfer tools stay closed |
 
-Anything beyond that — arbitrary `exec`, remote file search, SFTP upload or download, editing server records — stays out of the paired Agent surface. Every permitted operation appears in the desktop activity panel.
+Anything beyond that — arbitrary `exec`, remote file search, copying files that live on the **service host's own disk**, editing server records — stays out of the paired Agent surface. Every permitted operation appears in the desktop activity panel.
 
 [Agent collaboration model](docs/AGENT_COLLABORATION.md) · [Main Skill reference](skills/zxyssh/SKILL.md)
 
