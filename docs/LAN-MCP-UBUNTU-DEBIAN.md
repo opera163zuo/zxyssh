@@ -160,20 +160,24 @@ Three steps, each on the side that owns the decision:
    ~/.local/bin/zxyssh mcp hostkey trust prod.example --port 22 --fingerprint SHA256:…
    ```
 
-Then the Agent calls `session_create` with the saved site name, followed by `session_send_input`, `session_read` and `session_resize`. It can also list, read and write files on the target with `sftp_ls`, `sftp_read` and `sftp_write`, always scoped to a session it created. The LAN surface does not expose arbitrary `exec`, remote search, site mutation, or the host-local transfer tools (`sftp_upload`, `sftp_download`, directory upload and sync): those read and write paths on the machine running this service, so a remote Agent could use them to copy host files such as private keys. If a sudo password is configured for the site, `session_sudo` runs a non-interactive command through a separate SSH exec channel; the password never enters the Agent request, PTY input, audit summary or response. A command that requires an interactive TTY or password change fails closed.
+Then the Agent calls `session_create` with the saved site name, followed by `session_send_input`, `session_read` and `session_resize`. It can also list, read and write files on the target with `sftp_ls`, `sftp_read` and `sftp_write`, and carry binary content with `sftp_put_bytes` and `sftp_get_bytes`, always scoped to a session it created. The byte tools move content inside the request: no path on the machine running this service is ever read or written by them. The LAN surface does not expose arbitrary `exec`, remote search, site mutation, or the host-local transfer tools (`sftp_upload`, `sftp_download`, directory upload and sync): those read and write paths on the machine running this service, so a remote Agent could use them to copy host files such as private keys. If a sudo password is configured for the site, `session_sudo` runs a non-interactive command through a separate SSH exec channel; the password never enters the Agent request, PTY input, audit summary or response. A command that requires an interactive TTY or password change fails closed.
 
 ## 5. Verify before exposing it
 
 `scripts/test-lan-mcp-gateway.sh` re-checks the gateway against a throwaway state
 directory under `target/`. It never reads your saved servers, credentials or
 paired Agents, and it contacts no SSH host.
+`scripts/test-mcp-binary-transfer.sh` goes further: it pairs an Agent, connects it
+to a loopback-only OpenSSH container and moves real bytes both ways, including
+every refusal the design depends on. It builds its own site, credential and
+trusted host key in a throwaway directory, so your saved data is never read.
 
 ```bash
 bash scripts/test-lan-mcp-gateway.sh                  # free port, detected IPv4
 bash scripts/test-lan-mcp-gateway.sh 192.168.1.20     # name the interface address
 ```
 
-It asserts 30 checks in four groups:
+It asserts 32 checks in four groups:
 
 1. **Boot guard** — a non-loopback bind with no paired Agent must refuse to start.
 2. **Transport and auth** — health, `401` with no token and with a forged one,

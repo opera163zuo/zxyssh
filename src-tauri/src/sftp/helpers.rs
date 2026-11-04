@@ -1,7 +1,16 @@
 //! Shared SFTP helper functions used by both Tauri commands and MCP tools.
 
 use russh_sftp::{client::SftpSession, protocol::OpenFlags};
-use tokio::io::AsyncWriteExt;
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+/// Lowercase hex SHA-256, the form remote file integrity is reported in.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 /// Maximum recursion depth for directory operations (prevents symlink loops)
 pub const MAX_RECURSIVE_DEPTH: u32 = 100;
@@ -94,7 +103,8 @@ pub async fn resolve_remote_upload_path(
     }
 }
 
-fn remote_parent_dir(path: &str) -> Option<String> {
+/// Parent directory of a remote file path, or `None` when it has none.
+pub fn remote_parent_dir(path: &str) -> Option<String> {
     let path = path.trim_end_matches('/');
     if path.is_empty() || path == "/" {
         return None;
@@ -183,6 +193,183 @@ pub async fn write_remote_file_with_options(
     file.shutdown()
         .await
         .map_err(|e| format!("Failed to close remote file {}: {}", remote_path, e))
+}
+
+/// Write bytes to a remote file so that a failed transfer cannot be mistaken for
+/// a complete one.
+///
+/// The content lands in a sibling temporary file, is read back from the target and
+/// hashed, and only renames into place once the digest matches. `remote_path` is
+/// therefore either the previous file or the new one — never a partial write.
+/// Unlike [`write_remote_file`], missing parent directories are **not** created:
+/// an Agent placing a binary artifact should not be able to mint directory trees
+/// on the target as a side effect.
+pub async fn write_verified_remote_file(
+    sftp: &SftpSession,
+    remote_path: &str,
+    content: &[u8],
+    expected_sha256: &str,
+    overwrite: bool,
+    temp_suffix: &str,
+) -> Result<(), String> {
+    if remote_path.trim().is_empty() || remote_path.trim_end_matches('/') != remote_path {
+        return Err(format!("Remote upload path is not a file: {}", remote_path));
+    }
+
+    let parent = remote_parent_dir(remote_path).filter(|parent| parent != "/" && parent != ".");
+    if let Some(parent) = parent {
+        sftp.canonicalize(&parent).await.map_err(|_| {
+            format!(
+                "Parent directory '{}' does not exist on the target; create it before writing '{}'",
+                parent, remote_path
+            )
+        })?;
+    }
+
+    match sftp.metadata(remote_path).await {
+        Ok(metadata) if metadata.is_dir() => {
+            return Err(format!("Remote path is a directory: {}", remote_path))
+        }
+        Ok(_) if !overwrite => {
+            return Err(format!(
+                "Remote path already exists: {}. Pass mode=overwrite to replace it",
+                remote_path
+            ))
+        }
+        Ok(_) => {}
+        Err(_) => {}
+    }
+
+    let temp_path = format!("{}.zxyssh-part-{}", remote_path, temp_suffix);
+    let mut file = sftp
+        .open_with_flags(
+            &temp_path,
+            OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+        )
+        .await
+        .map_err(|e| format!("Failed to create temporary file {}: {}", temp_path, e))?;
+
+    let written = async {
+        file.write_all(content)
+            .await
+            .map_err(|e| format!("Failed to write {}: {}", temp_path, e))?;
+        file.shutdown()
+            .await
+            .map_err(|e| format!("Failed to close {}: {}", temp_path, e))
+    }
+    .await;
+    drop(file);
+    written?;
+
+    // Hash what the target actually holds, not what was handed to the SFTP
+    // client: a server that mangled or truncated the write must fail here.
+    let landed = match sftp.read(&temp_path).await {
+        Ok(landed) => landed,
+        Err(e) => {
+            let leftover = discard_temp_file(sftp, &temp_path).await;
+            return Err(format!(
+                "Failed to read back {} for verification: {}; temporary file {}",
+                temp_path, e, leftover
+            ));
+        }
+    };
+
+    if landed.len() != content.len() || sha256_hex(&landed) != expected_sha256 {
+        let leftover = discard_temp_file(sftp, &temp_path).await;
+        return Err(format!(
+            "Verification failed for '{}' ({} bytes on the target, expected {} bytes with sha256 {}); temporary file {}",
+            remote_path,
+            landed.len(),
+            content.len(),
+            expected_sha256,
+            leftover
+        ));
+    }
+
+    match sftp.rename(&temp_path, remote_path).await {
+        Ok(()) => Ok(()),
+        // Plain SSH_FXP_RENAME does not overwrite on every server, so replace the
+        // existing file only after the verified copy is in place.
+        Err(first_error) if overwrite => {
+            if let Err(e) = sftp.remove_file(remote_path).await {
+                let leftover = discard_temp_file(sftp, &temp_path).await;
+                return Err(format!(
+                    "Failed to replace '{}' with the verified upload: {}; temporary file {}",
+                    remote_path, e, leftover
+                ));
+            }
+            if let Err(e) = sftp.rename(&temp_path, remote_path).await {
+                let leftover = discard_temp_file(sftp, &temp_path).await;
+                return Err(format!(
+                    "Failed to move the verified upload onto '{}' (first rename: {}; retry: {}); temporary file {}",
+                    remote_path, first_error, e, leftover
+                ));
+            }
+            Ok(())
+        }
+        Err(e) => {
+            let leftover = discard_temp_file(sftp, &temp_path).await;
+            Err(format!(
+                "Failed to move {} onto '{}': {}; temporary file {}",
+                temp_path, remote_path, e, leftover
+            ))
+        }
+    }
+}
+
+/// Read one byte range of a remote file, returning its bytes and the file's total
+/// size so the caller can tell whether anything remains.
+pub async fn read_remote_range(
+    sftp: &SftpSession,
+    remote_path: &str,
+    offset: u64,
+    length: usize,
+) -> Result<(Vec<u8>, u64), String> {
+    let metadata = sftp
+        .metadata(remote_path)
+        .await
+        .map_err(|e| format!("Failed to read '{}': {}", remote_path, e))?;
+
+    if metadata.is_dir() {
+        return Err(format!("Remote path is a directory: {}", remote_path));
+    }
+
+    let total = metadata.len();
+    if offset > total {
+        return Err(format!(
+            "offset {} is past the end of '{}' ({} bytes)",
+            offset, remote_path, total
+        ));
+    }
+
+    let want = (total - offset).min(length as u64) as usize;
+    let mut file = sftp
+        .open(remote_path)
+        .await
+        .map_err(|e| format!("Failed to read '{}': {}", remote_path, e))?;
+
+    file.seek(std::io::SeekFrom::Start(offset))
+        .await
+        .map_err(|e| format!("Failed to seek to {} in '{}': {}", offset, remote_path, e))?;
+
+    let mut buffer = vec![0u8; want];
+    if let Err(e) = file.read_exact(&mut buffer).await {
+        return Err(format!(
+            "Failed to read {} bytes from '{}' at {}: {}; the file may have changed while reading",
+            want, remote_path, offset, e
+        ));
+    }
+
+    Ok((buffer, total))
+}
+
+/// Best-effort removal of a temporary upload, phrased so the caller can report
+/// either outcome without hiding a leftover file.
+async fn discard_temp_file(sftp: &SftpSession, temp_path: &str) -> String {
+    match sftp.remove_file(temp_path).await {
+        Ok(()) => "was removed".to_string(),
+        Err(_) => format!("was left behind at {}", temp_path),
+    }
 }
 
 /// Recursively delete a directory via SFTP with depth limit to prevent symlink loops

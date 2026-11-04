@@ -8,6 +8,7 @@
 //! in the core library for compatibility with direct embedders.
 
 pub mod agent_input;
+pub mod binary;
 pub mod gateway;
 pub mod lan_status;
 #[cfg(test)]

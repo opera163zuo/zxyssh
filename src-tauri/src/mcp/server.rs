@@ -16,6 +16,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
@@ -24,8 +25,9 @@ use uuid::Uuid;
 use crate::remote_tools::{build_remote_rg_command, RemoteSearchOptions};
 use crate::session::SessionManager;
 use crate::sftp::helpers::{
-    resolve_remote_path, resolve_remote_upload_path, sftp_delete_path, sftp_mkdir_recursive,
-    write_remote_file, write_remote_file_with_options, WriteRemoteFileOptions,
+    read_remote_range, resolve_remote_path, resolve_remote_upload_path, sftp_delete_path,
+    sftp_mkdir_recursive, sha256_hex, write_remote_file, write_remote_file_with_options,
+    write_verified_remote_file, WriteRemoteFileOptions,
 };
 use crate::sftp::{
     effective_directory_transfer_options, transfer_directory_to_sftp, DirectoryTransferMode,
@@ -34,6 +36,7 @@ use crate::storage::models::{AuthType, Server};
 use crate::storage::Database;
 
 use super::agent_input::SharedAgentInputTracker;
+use super::binary::{clamp_range, decode_payload};
 use super::pairing::{AuthenticatedAgent, PairingRegistry};
 use super::pairing_http::{
     audit_label, handle_onboarding, handle_pair, handle_pair_request, handle_pair_status,
@@ -575,6 +578,8 @@ async fn handle_tools_call(
                 | "sftp_ls"
                 | "sftp_read"
                 | "sftp_write"
+                | "sftp_put_bytes"
+                | "sftp_get_bytes"
         ) {
             if name == "session_kill" && arguments.get("all").and_then(Value::as_bool) == Some(true)
             {
@@ -707,8 +712,10 @@ fn activity_summary(name: &str, args: &Value) -> String {
         "session_send_input" => {
             Some("Terminal input submission; complete commands are recorded separately")
         }
-        "sftp_ls" | "sftp_mkdir" | "sftp_rm" | "sftp_read" | "sftp_write" | "get_content"
-        | "edit_file" | "add_file" => args.get("path").and_then(Value::as_str),
+        "sftp_ls" | "sftp_mkdir" | "sftp_rm" | "sftp_read" | "sftp_write" | "sftp_put_bytes"
+        | "sftp_get_bytes" | "get_content" | "edit_file" | "add_file" => {
+            args.get("path").and_then(Value::as_str)
+        }
         "sftp_upload" | "sftp_upload_directory" | "sftp_sync_directory" => args
             .get("remote_path")
             .or_else(|| args.get("local_path"))
@@ -812,6 +819,8 @@ async fn execute_tool(
         "sftp_mv" => tool_sftp_mv(state, args).await,
         "sftp_read" => tool_sftp_read(state, args).await,
         "sftp_write" => tool_sftp_write(state, args).await,
+        "sftp_put_bytes" => tool_sftp_put_bytes(state, args).await,
+        "sftp_get_bytes" => tool_sftp_get_bytes(state, args).await,
         "get_content" => tool_sftp_read(state, args).await,
         "edit_file" => tool_edit_file(state, args).await,
         "add_file" => tool_add_file(state, args).await,
@@ -2067,23 +2076,40 @@ async fn tool_sftp_read(state: &McpState, args: &Value) -> Result<String, String
         .await
         .map_err(|e| format!("Failed to read '{}': {}", resolved_path, e))?;
 
-    if content.len() > max_bytes {
-        let truncated = &content[..max_bytes];
-        let text = String::from_utf8_lossy(truncated);
-        Ok(format!(
-            "[Truncated: showing {}/{} bytes]\n{}",
-            max_bytes,
-            content.len(),
-            text
-        ))
-    } else {
-        String::from_utf8(content).map_err(|_| {
-            format!(
-                "File '{}' contains non-UTF-8 binary content. Use sftp_download instead.",
-                resolved_path
-            )
-        })
+    render_remote_text(&resolved_path, content, max_bytes)
+}
+
+/// Render bytes read from a remote file as text.
+///
+/// The whole payload is validated before any truncation happens: cutting first
+/// would hand an Agent replacement characters from a binary file, which it could
+/// then write back through `sftp_write` and silently corrupt.
+fn render_remote_text(path: &str, content: Vec<u8>, max_bytes: usize) -> Result<String, String> {
+    let text = String::from_utf8(content).map_err(|_| {
+        format!(
+            "File '{}' contains non-UTF-8 binary content. sftp_read carries text only. \
+             Binary content needs sftp_download/sftp_upload, which are not available to paired Agents \
+             because those tools read and write the service host's own disk; from a terminal use \
+             file, sha256sum or head -c | xxd to inspect the file.",
+            path
+        )
+    })?;
+
+    if text.len() <= max_bytes {
+        return Ok(text);
     }
+
+    // Back off to a character boundary so the cut cannot split a codepoint.
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    Ok(format!(
+        "[Truncated: showing {}/{} bytes]\n{}",
+        end,
+        text.len(),
+        &text[..end]
+    ))
 }
 
 async fn tool_sftp_write(state: &McpState, args: &Value) -> Result<String, String> {
@@ -2112,6 +2138,109 @@ async fn tool_sftp_write(state: &McpState, args: &Value) -> Result<String, Strin
         content.len(),
         resolved_path
     ))
+}
+
+/// Write arbitrary bytes to the target host. Content arrives base64-encoded in
+/// this request, is checked against the caller's digest before anything is
+/// written, and lands through a verified temporary file, so a failed transfer
+/// cannot leave a partial artifact where the next command will pick it up.
+async fn tool_sftp_put_bytes(state: &McpState, args: &Value) -> Result<String, String> {
+    let session_id = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required field: session_id")?;
+
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required field: path")?;
+
+    let data_base64 = args
+        .get("data_base64")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required field: data_base64")?;
+
+    let sha256 = args
+        .get("sha256")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required field: sha256")?;
+
+    let mode = args
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("overwrite");
+    let overwrite = match mode {
+        "overwrite" => true,
+        "create_new" => false,
+        other => {
+            return Err(format!(
+                "Unknown mode '{}'; expected overwrite or create_new",
+                other
+            ))
+        }
+    };
+
+    let bytes = decode_payload(data_base64, sha256)?;
+    let digest = sha256_hex(&bytes);
+
+    let (sftp, home_dir) = open_sftp_for_session(state, session_id).await?;
+    let resolved_path = resolve_remote_path(path, &home_dir, &home_dir);
+    let temp_suffix = Uuid::new_v4().simple().to_string();
+
+    write_verified_remote_file(
+        &sftp,
+        &resolved_path,
+        &bytes,
+        &digest,
+        overwrite,
+        &temp_suffix,
+    )
+    .await?;
+
+    Ok(format!(
+        "Wrote {} bytes to '{}' (sha256 {}, mode {}, verified by read-back)",
+        bytes.len(),
+        resolved_path,
+        digest,
+        mode
+    ))
+}
+
+/// Read a byte range of a remote file as base64. Unlike `sftp_read` this carries
+/// any content type, and paging with `offset` covers files larger than one call.
+async fn tool_sftp_get_bytes(state: &McpState, args: &Value) -> Result<String, String> {
+    let session_id = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required field: session_id")?;
+
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required field: path")?;
+
+    let offset = args
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default();
+    let length = clamp_range(args.get("length").and_then(|v| v.as_u64()));
+
+    let (sftp, home_dir) = open_sftp_for_session(state, session_id).await?;
+    let resolved_path = resolve_remote_path(path, &home_dir, &home_dir);
+
+    let (bytes, total) = read_remote_range(&sftp, &resolved_path, offset, length).await?;
+
+    Ok(json!({
+        "path": resolved_path,
+        "offset": offset,
+        "length": bytes.len(),
+        "total_bytes": total,
+        "eof": offset.saturating_add(bytes.len() as u64) >= total,
+        "encoding": "base64",
+        "sha256": sha256_hex(&bytes),
+        "data_base64": STANDARD.encode(&bytes),
+    })
+    .to_string())
 }
 
 async fn tool_add_file(state: &McpState, args: &Value) -> Result<String, String> {
@@ -2284,6 +2413,51 @@ mod tests {
                 Arc::new(token.to_string()),
                 require_bearer_token,
             ))
+    }
+
+    #[test]
+    fn sftp_read_refuses_binary_whatever_its_size() {
+        // Both branches used to differ: a binary file within max_bytes errored,
+        // a larger one returned lossy text the Agent could write back corrupted.
+        let binary = vec![0x7f, 0x45, 0x4c, 0x46, 0xff, 0xfe];
+        for max_bytes in [1024, 2] {
+            let error = render_remote_text("/bin/true", binary.clone(), max_bytes)
+                .expect_err("binary must not be returned as text");
+            assert!(
+                error.contains("non-UTF-8 binary content"),
+                "unexpected error: {error}"
+            );
+            assert!(error.contains("/bin/true"));
+            assert!(!error.contains('\u{fffd}'), "binary leaked into the error");
+        }
+    }
+
+    #[test]
+    fn sftp_read_truncation_reports_the_boundary_it_actually_used() {
+        let text = "abcdefg".to_string();
+        let shown = render_remote_text("/x", text.into_bytes(), 4).unwrap();
+        assert!(
+            shown.starts_with("[Truncated: showing 4/7 bytes]\nabcd"),
+            "unexpected result: {shown}"
+        );
+
+        // Exact fit and a short file are returned whole, with no prefix.
+        assert_eq!(
+            render_remote_text("/x", b"abcd".to_vec(), 4).unwrap(),
+            "abcd"
+        );
+    }
+
+    #[test]
+    fn sftp_read_truncation_never_splits_a_multibyte_character() {
+        // "日" is three bytes, so a 4-byte cap lands inside the second one.
+        let text = "日本語".to_string();
+        let shown = render_remote_text("/x", text.into_bytes(), 4).unwrap();
+        assert!(
+            shown.starts_with("[Truncated: showing 3/9 bytes]\n日"),
+            "unexpected result: {shown}"
+        );
+        assert!(!shown.contains('\u{fffd}'));
     }
 
     #[test]
