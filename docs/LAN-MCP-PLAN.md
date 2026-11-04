@@ -19,7 +19,8 @@ Phases 0-4 are implemented and verified end-to-end on a Debian 13 host against a
 - Every audited action records the paired Agent identity.
 - `zxyssh mcp credential set|clear` and `zxyssh mcp hostkey probe|trust|list` let a headless server actually reach a target machine without a GUI, with secrets accepted only on stdin and host keys pinned only after the operator repeats the fingerprint.
 - systemd unit, backup/restore and firewall/TLS procedures are documented in `docs/LAN-MCP-UBUNTU-DEBIAN.md`.
-- `bash scripts/test-lan-mcp-gateway.sh [address]` re-runs the whole gate (30 checks: bind guard, pairing and consent delivery, bearer auth, the Agent tool allowlist, `202` notifications, body limit, encrypted audit, instant revocation) against a throwaway state directory, so an operator can verify a deployment without touching saved user data.
+- `bash scripts/test-lan-mcp-gateway.sh [address]` re-runs the transport gate (32 checks: bind guard, pairing and consent delivery, bearer auth, the Agent tool allowlist, `202` notifications, body limit, encrypted audit, instant revocation) against a throwaway state directory, so an operator can verify a deployment without touching saved user data.
+- `bash scripts/test-mcp-binary-transfer.sh` re-runs the transfer gate (37 checks) with a paired Agent actually connected to a loopback-only OpenSSH container: bytes out, verified by read-back, ranged reads, every refusal, cross-Agent ownership and audit growth. It creates its own site, credential and host key in a throwaway directory, so no saved user data is read.
 
 Not yet delivered, and required before this is called production-ready:
 

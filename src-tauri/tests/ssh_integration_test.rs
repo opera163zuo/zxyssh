@@ -295,6 +295,148 @@ async fn sftp_binary_unicode_roundtrip_and_reuse() -> Result<()> {
 
 #[tokio::test]
 #[ignore = "isolated OpenSSH fixture required"]
+async fn verified_upload_lands_whole_or_not_at_all() -> Result<()> {
+    use zxyssh_core::sftp::helpers::{read_remote_range, sha256_hex, write_verified_remote_file};
+
+    let mut fixture = Fixture::new("SSH_TEST_PORT", "host.pub")?;
+    fixture.password().await?;
+    let sftp = fixture.client.open_sftp_session().await?;
+
+    // Not valid UTF-8, so nothing on this path can be confused with the text tools.
+    let data: Vec<u8> = (0..524_288).map(|index| (index % 256) as u8).collect();
+    let digest = sha256_hex(&data);
+    let path = "/home/audit/blob.bin";
+
+    write_verified_remote_file(&sftp, path, &data, &digest, true, "landed")
+        .await
+        .expect("verified upload should succeed");
+    assert_eq!(sftp.read(path).await?, data);
+
+    // A declared digest the target does not hold must fail, and the failure must
+    // not leave either the real path or the temporary file behind.
+    let wrong = sha256_hex(b"described by a different digest");
+    let error = write_verified_remote_file(&sftp, path, &data, &wrong, true, "refused")
+        .await
+        .expect_err("a mismatching digest must fail");
+    assert!(error.contains("Verification failed"), "{error}");
+    assert!(
+        sftp.metadata(format!("{path}.zxyssh-part-refused"))
+            .await
+            .is_err(),
+        "the rejected temporary file was left on the target"
+    );
+    assert_eq!(
+        sftp.read(path).await?,
+        data,
+        "the failure touched the real path"
+    );
+
+    // Ranges page without the caller having to fetch the whole file.
+    let (window, total) = read_remote_range(&sftp, path, 4096, 8192)
+        .await
+        .expect("a bounded range should read cleanly");
+    assert_eq!(total, data.len() as u64);
+    assert_eq!(window, data[4096..12_288]);
+    let (tail, _) = read_remote_range(&sftp, path, (data.len() - 10) as u64, 1000)
+        .await
+        .expect("a range clipped by the end of the file should still read");
+    assert_eq!(tail.len(), 10);
+
+    assert!(read_remote_range(&sftp, path, data.len() as u64 + 1, 16)
+        .await
+        .expect_err("offset past end should fail")
+        .contains("past the end"));
+
+    // Parents are not minted as a side effect of writing a file.
+    let nested = "/home/audit/absent/deep/blob.bin";
+    assert!(
+        write_verified_remote_file(&sftp, nested, &data, &digest, true, "nested")
+            .await
+            .expect_err("a missing parent directory should fail")
+            .contains("Parent directory")
+    );
+
+    // mode=create_new refuses an existing file before writing anything.
+    assert!(
+        write_verified_remote_file(&sftp, path, &data, &digest, false, "exists")
+            .await
+            .expect_err("create_new should refuse an existing path")
+            .contains("already exists")
+    );
+
+    // The payload moves onto the path instead of being written through it, so a
+    // symlink there is replaced rather than followed into whatever it points at.
+    let mut victim = sftp
+        .create("/home/audit/victim")
+        .await
+        .map_err(|e| anyhow::anyhow!("victim create: {e}"))?;
+    victim
+        .write_all(b"original")
+        .await
+        .map_err(|e| anyhow::anyhow!("victim write: {e}"))?;
+    victim
+        .shutdown()
+        .await
+        .map_err(|e| anyhow::anyhow!("victim close: {e}"))?;
+    drop(victim);
+    // Made through the shell because this server answers SSH_FXP_SYMLINK with a
+    // bare failure. What matters is only that a link exists at the target path.
+    fixture
+        .client
+        .exec_command("ln -s /home/audit/victim /home/audit/link")
+        .await
+        .map_err(|e| anyhow::anyhow!("symlink: {e}"))?;
+    write_verified_remote_file(
+        &sftp,
+        "/home/audit/link",
+        b"replaced",
+        &sha256_hex(b"replaced"),
+        true,
+        "link",
+    )
+    .await
+    .expect("an upload onto a symlink path should land");
+    let victim = sftp
+        .read("/home/audit/victim")
+        .await
+        .map_err(|e| anyhow::anyhow!("victim read: {e}"))?;
+    assert_eq!(
+        victim, b"original",
+        "the upload was written through the symlink into its target"
+    );
+    let link = sftp
+        .read("/home/audit/link")
+        .await
+        .map_err(|e| anyhow::anyhow!("link read: {e}"))?;
+    assert_eq!(link, b"replaced");
+    sftp.remove_file("/home/audit/link")
+        .await
+        .map_err(|e| anyhow::anyhow!("link remove: {e}"))?;
+    sftp.remove_file("/home/audit/victim")
+        .await
+        .map_err(|e| anyhow::anyhow!("victim remove: {e}"))?;
+
+    // A directory target is refused rather than opened.
+    assert!(write_verified_remote_file(
+        &sftp,
+        "/home/audit",
+        b"hi",
+        &sha256_hex(b"hi"),
+        true,
+        "dir"
+    )
+    .await
+    .expect_err("a directory is not a file")
+    .contains("directory"));
+
+    sftp.remove_file(path).await?;
+    sftp.close().await?;
+    fixture.client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "isolated OpenSSH fixture required"]
 async fn streaming_download_and_same_size_directory_sync() -> Result<()> {
     use zxyssh_core::sftp::sync::download_remote_file_streaming;
     use zxyssh_core::sftp::{

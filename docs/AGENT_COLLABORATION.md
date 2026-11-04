@@ -6,7 +6,7 @@
 
 The desktop and the MCP service read the same saved sites. Credentials, private keys, passphrases and sudo passwords are decrypted only inside the Rust service. They do not cross into the React frontend, an Agent prompt, an activity record or a log line.
 
-A paired Agent is a terminal user with remote file text access, not an operator of the host. It can list sites by name, open its own session, type into that session, read its output, resize it and close it, and list, read or write files on the target through SFTP — always on a session it created. Arbitrary `exec`, remote search, site CRUD and the host-local transfer tools (`sftp_upload`, `sftp_download`, directory upload and sync) are not on the paired-Agent tool surface; asking for them is rejected rather than silently degraded. Those transfer tools take paths on the machine running the MCP service, so exposing them would let a remote Agent copy host files, including private keys, to a target of its choosing.
+A paired Agent is a terminal user with remote file text access, not an operator of the host. It can list sites by name, open its own session, type into that session, read its output, resize it and close it, and list, read or write files on the target through SFTP, including verified binary content — always on a session it created. Arbitrary `exec`, remote search, site CRUD and the host-local transfer tools (`sftp_upload`, `sftp_download`, directory upload and sync) are not on the paired-Agent tool surface; asking for them is rejected rather than silently degraded. Those transfer tools take paths on the machine running the MCP service, so exposing them would let a remote Agent copy host files, including private keys, to a target of its choosing.
 
 ## Visible operations without interfering with a person
 
@@ -44,6 +44,6 @@ Regenerate repository references with `cargo run --locked -p zxyssh-plugins --ex
 
 ## Validation boundaries
 
-Regression tests cover the Agent tool allowlist, session ownership, batch-kill refusal, pairing, revocation, body limits, audit-at-rest, atomic credential edits and reference/catalog parity. `scripts/test-lan-mcp-gateway.sh` drives a real listener end to end inside a throwaway state directory. The loopback OpenSSH fixture covers common authentication, PTY and SFTP behavior.
+Regression tests cover the Agent tool allowlist, session ownership, batch-kill refusal, pairing, revocation, body limits, audit-at-rest, atomic credential edits and reference/catalog parity. `scripts/test-lan-mcp-gateway.sh` drives a real listener end to end inside a throwaway state directory, and `scripts/test-mcp-binary-transfer.sh` pairs an Agent against a live loopback OpenSSH container to move verified bytes in both directions. The loopback OpenSSH fixture covers common authentication, PTY and SFTP behavior.
 
 These checks do not prove every external server, MFA flow or platform works. Plain HTTP carries the bearer token in clear text, so it is only acceptable on a trusted internal network; UI interaction, binary packaging, signature validation and installed-app behavior need separate verification. Keep desktop, service and Skill versions aligned during upgrades, and preserve active work before restarting an owner process.

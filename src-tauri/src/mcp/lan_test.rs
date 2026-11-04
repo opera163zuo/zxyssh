@@ -240,7 +240,7 @@ async fn tools_list_and_an_authorized_read_only_tool_call() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(names.len(), 10);
+    assert_eq!(names.len(), 12);
     for name in [
         "server_list",
         "session_create",
@@ -252,6 +252,8 @@ async fn tools_list_and_an_authorized_read_only_tool_call() {
         "sftp_ls",
         "sftp_read",
         "sftp_write",
+        "sftp_put_bytes",
+        "sftp_get_bytes",
     ] {
         assert!(names.contains(name), "missing {name}");
     }

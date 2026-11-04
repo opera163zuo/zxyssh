@@ -85,6 +85,8 @@ jobs:
         run: |
           cargo build --release --locked -p zxyssh --bin zxyssh
           bash scripts/test-lan-mcp-gateway.sh
+      - name: Binary transfer over a live Agent session
+        run: bash scripts/test-mcp-binary-transfer.sh
 
   check-clippy:
     name: Clippy Lint
